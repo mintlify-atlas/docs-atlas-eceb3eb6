@@ -1,0 +1,578 @@
+---
+title: 'GraphQL Client'
+description: 'Low-level GraphQL client for Shopify APIs'
+---
+
+The base GraphQL client provides low-level GraphQL functionality used by both Admin and Storefront API clients.
+
+## createGraphQLClient()
+
+Creates a generic GraphQL client with support for queries, mutations, and streaming responses.
+
+```typescript
+import { createGraphQLClient } from '@shopify/graphql-client';
+
+const client = createGraphQLClient({
+  url: 'https://my-store.myshopify.com/api/2025-10/graphql.json',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Shopify-Access-Token': 'your-access-token',
+  },
+});
+```
+
+<Note>
+  In most cases, you should use [`createAdminApiClient()`](/api-reference/admin-api-client) or [`createStorefrontApiClient()`](/api-reference/storefront-api-client) instead of the base GraphQL client. Those clients handle authentication, URL formatting, and API versioning automatically.
+</Note>
+
+### Parameters
+
+<ParamField path="url" type="string" required>
+  The complete GraphQL API endpoint URL
+</ParamField>
+
+<ParamField path="headers" type="Headers" required>
+  HTTP headers to include with every request. Must include authentication headers.
+  
+  ```typescript
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Shopify-Access-Token': 'token',
+  }
+  ```
+</ParamField>
+
+<ParamField path="retries" type="number" default="0">
+  Number of retry attempts for failed requests
+</ParamField>
+
+<ParamField path="customFetchApi" type="CustomFetchApi" default="fetch">
+  Custom fetch implementation. Useful for adding middleware or using in non-browser environments.
+  
+  ```typescript
+  type CustomFetchApi = (
+    url: string,
+    init?: {
+      method?: string;
+      headers?: HeadersInit;
+      body?: string;
+      signal?: AbortSignal;
+      keepalive?: boolean;
+    }
+  ) => Promise<Response>;
+  ```
+</ParamField>
+
+<ParamField path="logger" type="Logger">
+  Logger function for debugging and monitoring. Receives log events for HTTP responses, retries, and deprecation notices.
+  
+  ```typescript
+  type Logger = (logContent: LogContentTypes) => void;
+  ```
+</ParamField>
+
+### Returns
+
+<ResponseField name="GraphQLClient" type="object">
+  GraphQL client instance with the following properties:
+
+  <Expandable title="properties">
+    <ResponseField name="config" type="ClientConfig">
+      Read-only configuration object:
+      - `url`: The GraphQL endpoint URL
+      - `headers`: Default headers for all requests
+      - `retries`: Number of retry attempts
+    </ResponseField>
+
+    <ResponseField name="fetch" type="function">
+      Low-level fetch method that returns a raw `Response` object
+      
+      ```typescript
+      fetch(operation: string, options?: RequestOptions): Promise<Response>
+      ```
+    </ResponseField>
+
+    <ResponseField name="request" type="function">
+      GraphQL request method that returns parsed response data
+      
+      ```typescript
+      request<TData>(
+        operation: string,
+        options?: RequestOptions
+      ): Promise<ClientResponse<TData>>
+      ```
+    </ResponseField>
+
+    <ResponseField name="requestStream" type="function">
+      Streaming request method for `@defer` operations
+      
+      ```typescript
+      requestStream<TData>(
+        operation: string,
+        options?: RequestOptions
+      ): Promise<ClientStreamIterator<TData>>
+      ```
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Client Methods
+
+### fetch()
+
+Executes a GraphQL operation and returns the raw `Response` object.
+
+```typescript
+const response = await client.fetch(
+  `query { shop { name } }`,
+  {
+    variables: {},
+    headers: { 'X-Custom': 'value' },
+  }
+);
+
+const data = await response.json();
+```
+
+<ParamField path="operation" type="string" required>
+  GraphQL query or mutation string
+</ParamField>
+
+<ParamField path="options" type="RequestOptions">
+  Request options:
+  
+  <Expandable title="properties">
+    <ParamField path="variables" type="OperationVariables">
+      GraphQL variables object
+    </ParamField>
+
+    <ParamField path="headers" type="Headers">
+      Additional headers to merge with default headers
+    </ParamField>
+
+    <ParamField path="url" type="string">
+      Override the default endpoint URL for this request
+    </ParamField>
+
+    <ParamField path="retries" type="number">
+      Override the default retry count for this request
+    </ParamField>
+
+    <ParamField path="signal" type="AbortSignal">
+      AbortSignal for request cancellation
+    </ParamField>
+
+    <ParamField path="keepalive" type="boolean">
+      Keep connection alive for subsequent requests
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### request()
+
+Executes a GraphQL operation and returns parsed response data with error handling.
+
+```typescript
+const { data, errors, extensions } = await client.request(
+  `query getShop {
+    shop {
+      name
+      email
+    }
+  }`
+);
+
+if (errors) {
+  console.error('GraphQL errors:', errors.graphQLErrors);
+} else {
+  console.log('Shop:', data.shop.name);
+}
+```
+
+<Warning>
+  Do not use `request()` for operations with `@defer` directives. Use `requestStream()` instead.
+</Warning>
+
+**Returns**: `Promise<ClientResponse<TData>>`
+
+<ResponseField name="data" type="TData">
+  The GraphQL response data
+</ResponseField>
+
+<ResponseField name="errors" type="ResponseErrors">
+  Error information if the request failed:
+  
+  <Expandable title="properties">
+    <ResponseField name="networkStatusCode" type="number">
+      HTTP status code
+    </ResponseField>
+
+    <ResponseField name="message" type="string">
+      Error message
+    </ResponseField>
+
+    <ResponseField name="graphQLErrors" type="any[]">
+      Array of GraphQL errors from the response
+    </ResponseField>
+
+    <ResponseField name="response" type="Response">
+      Raw Response object for additional debugging
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="extensions" type="object">
+  GraphQL extensions from the response (e.g., query cost information)
+</ResponseField>
+
+<ResponseField name="headers" type="Headers">
+  Response headers
+</ResponseField>
+
+### requestStream()
+
+Executes a GraphQL operation with `@defer` directives and returns an async iterator for streaming responses.
+
+```typescript
+const stream = await client.requestStream(
+  `query {
+    shop { name }
+    products(first: 100) @defer {
+      edges { node { id title } }
+    }
+  }`
+);
+
+for await (const chunk of stream) {
+  console.log('Received chunk:', chunk.data);
+  console.log('Has more data:', chunk.hasNext);
+  
+  if (chunk.errors) {
+    console.error('Chunk errors:', chunk.errors);
+  }
+}
+```
+
+<Warning>
+  Only use `requestStream()` for operations containing `@defer` directives. For regular operations, use `request()` instead.
+</Warning>
+
+**Returns**: `Promise<ClientStreamIterator<TData>>`
+
+The async iterator yields `ClientStreamResponse<TData>` objects:
+
+<ResponseField name="data" type="TData">
+  Accumulated GraphQL response data from all chunks received so far
+</ResponseField>
+
+<ResponseField name="hasNext" type="boolean">
+  `true` if more data chunks are expected, `false` when the stream is complete
+</ResponseField>
+
+<ResponseField name="errors" type="ResponseErrors">
+  Error information if the request or stream failed
+</ResponseField>
+
+<ResponseField name="extensions" type="object">
+  GraphQL extensions from the response
+</ResponseField>
+
+## Example Usage
+
+<CodeGroup>
+
+```typescript Basic Setup
+import { createGraphQLClient } from '@shopify/graphql-client';
+
+const client = createGraphQLClient({
+  url: 'https://my-store.myshopify.com/admin/api/2025-10/graphql.json',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Shopify-Access-Token': process.env.ACCESS_TOKEN,
+  },
+  retries: 2,
+});
+```
+
+```typescript Simple Query
+const { data, errors } = await client.request(`
+  query {
+    shop {
+      name
+      email
+      plan {
+        displayName
+      }
+    }
+  }
+`);
+
+if (errors) {
+  console.error('Request failed:', errors.message);
+} else {
+  console.log('Shop:', data.shop);
+}
+```
+
+```typescript With Variables
+const PRODUCT_QUERY = `
+  query getProduct($id: ID!, $includeVariants: Boolean!) {
+    product(id: $id) {
+      id
+      title
+      variants(first: 10) @include(if: $includeVariants) {
+        edges {
+          node {
+            id
+            price
+          }
+        }
+      }
+    }
+  }
+`;
+
+const { data, errors } = await client.request(PRODUCT_QUERY, {
+  variables: {
+    id: 'gid://shopify/Product/123',
+    includeVariants: true,
+  },
+});
+```
+
+```typescript Streaming with @defer
+const DEFERRED_QUERY = `
+  query {
+    shop {
+      name
+    }
+    products(first: 100) @defer {
+      edges {
+        node {
+          id
+          title
+          description
+        }
+      }
+    }
+  }
+`;
+
+const stream = await client.requestStream(DEFERRED_QUERY);
+
+for await (const { data, hasNext, errors } of stream) {
+  if (errors) {
+    console.error('Stream error:', errors);
+    break;
+  }
+  
+  console.log('Current data:', data);
+  
+  if (!hasNext) {
+    console.log('Stream complete');
+  }
+}
+```
+
+```typescript Error Handling
+const { data, errors } = await client.request(QUERY);
+
+if (errors) {
+  // Network or HTTP error
+  if (errors.networkStatusCode) {
+    console.error(`HTTP ${errors.networkStatusCode}: ${errors.message}`);
+  }
+  
+  // GraphQL errors
+  if (errors.graphQLErrors) {
+    errors.graphQLErrors.forEach((error) => {
+      console.error('GraphQL error:', error.message);
+      if (error.extensions?.code === 'THROTTLED') {
+        console.log('Rate limited, retry after delay');
+      }
+    });
+  }
+} else {
+  // Success
+  console.log('Data:', data);
+}
+```
+
+```typescript Custom Fetch
+import fetch from 'node-fetch';
+
+const client = createGraphQLClient({
+  url: 'https://my-store.myshopify.com/admin/api/2025-10/graphql.json',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Shopify-Access-Token': process.env.ACCESS_TOKEN,
+  },
+  customFetchApi: fetch as any,
+});
+```
+
+```typescript With Logger
+const client = createGraphQLClient({
+  url: API_URL,
+  headers: HEADERS,
+  logger: (logContent) => {
+    if (logContent.type === 'HTTP-Response') {
+      const { requestParams, response } = logContent.content;
+      console.log('Request:', requestParams[0]);
+      console.log('Status:', response.status);
+    }
+    
+    if (logContent.type === 'HTTP-Retry') {
+      const { retryAttempt, maxRetries } = logContent.content;
+      console.log(`Retrying: ${retryAttempt}/${maxRetries}`);
+    }
+    
+    if (logContent.type === 'HTTP-Response-GraphQL-Deprecation-Notice') {
+      console.warn('Deprecation:', logContent.content.deprecationNotice);
+    }
+  },
+});
+```
+
+```typescript Abort Request
+const controller = new AbortController();
+
+const requestPromise = client.request(QUERY, {
+  signal: controller.signal,
+});
+
+// Cancel after 5 seconds
+setTimeout(() => {
+  controller.abort();
+}, 5000);
+
+try {
+  const { data } = await requestPromise;
+} catch (error) {
+  if (error.name === 'AbortError') {
+    console.log('Request was cancelled');
+  }
+}
+```
+
+</CodeGroup>
+
+## Types
+
+```typescript
+interface ClientOptions {
+  headers: Record<string, string | string[]>;
+  url: string;
+  customFetchApi?: CustomFetchApi;
+  retries?: number;
+  logger?: Logger;
+}
+
+interface ClientConfig {
+  readonly headers: Record<string, string | string[]>;
+  readonly url: string;
+  readonly retries: number;
+}
+
+interface RequestOptions {
+  variables?: Record<string, any>;
+  url?: string;
+  headers?: Record<string, string | string[]>;
+  retries?: number;
+  keepalive?: boolean;
+  signal?: AbortSignal;
+}
+
+interface ClientResponse<TData = any> {
+  data?: TData;
+  errors?: ResponseErrors;
+  extensions?: Record<string, any>;
+  headers?: Headers;
+}
+
+interface ClientStreamResponse<TData = any> extends ClientResponse<TData> {
+  hasNext: boolean;
+}
+
+interface ResponseErrors {
+  networkStatusCode?: number;
+  message?: string;
+  graphQLErrors?: any[];
+  response?: Response;
+}
+
+type Logger = (logContent: LogContentTypes) => void;
+
+type LogContentTypes =
+  | HTTPResponseLog
+  | HTTPRetryLog
+  | HTTPResponseGraphQLDeprecationNotice;
+```
+
+## Retry Behavior
+
+The client automatically retries requests for certain HTTP status codes:
+
+- `429` - Too Many Requests (rate limiting)
+- `503` - Service Unavailable
+
+Retries use exponential backoff with the following behavior:
+- First retry: immediate
+- Subsequent retries: wait time increases exponentially
+- `Retry-After` header is respected when present
+
+```typescript
+const client = createGraphQLClient({
+  url: API_URL,
+  headers: HEADERS,
+  retries: 3, // Retry up to 3 times
+});
+```
+
+## Logging
+
+The logger receives three types of events:
+
+### HTTP-Response
+
+```typescript
+{
+  type: 'HTTP-Response',
+  content: {
+    requestParams: [url, init],
+    response: Response,
+  }
+}
+```
+
+### HTTP-Retry
+
+```typescript
+{
+  type: 'HTTP-Retry',
+  content: {
+    requestParams: [url, init],
+    lastResponse?: Response,
+    retryAttempt: number,
+    maxRetries: number,
+  }
+}
+```
+
+### HTTP-Response-GraphQL-Deprecation-Notice
+
+```typescript
+{
+  type: 'HTTP-Response-GraphQL-Deprecation-Notice',
+  content: {
+    requestParams: [url, init],
+    deprecationNotice: string,
+  }
+}
+```
+
+## Related
+
+- [Admin API Client](/api-reference/admin-api-client)
+- [Storefront API Client](/api-reference/storefront-api-client)
+- [Shopify GraphQL Admin API](https://shopify.dev/api/admin-graphql)

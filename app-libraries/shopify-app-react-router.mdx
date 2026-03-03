@@ -1,0 +1,669 @@
+---
+title: "@shopify/shopify-app-react-router"
+description: Build Shopify apps with React Router v7 - modern routing with built-in authentication and API access
+---
+
+`@shopify/shopify-app-react-router` makes it easy to build Shopify apps using React Router v7. It provides the same powerful features as the Remix adapter with React Router's routing model.
+
+## Installation
+
+```bash
+npm install @shopify/shopify-app-react-router @shopify/shopify-app-session-storage-prisma
+```
+
+<Note>
+Requires Node.js >= 20.0.0 and React Router >= 7.6.2
+</Note>
+
+## Quick Start
+
+### 1. Configure Your App
+
+Create `app/shopify.server.ts`:
+
+```typescript
+import { shopifyApp } from "@shopify/shopify-app-react-router/server";
+import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
+import { restResources } from "@shopify/shopify-api/rest/admin/2024-01";
+import prisma from "~/db.server";
+
+const shopify = shopifyApp({
+  apiKey: process.env.SHOPIFY_API_KEY!,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET!,
+  scopes: process.env.SCOPES?.split(",")!,
+  appUrl: process.env.SHOPIFY_APP_URL!,
+  apiVersion: "2024-01",
+  sessionStorage: new PrismaSessionStorage(prisma),
+  restResources,
+  
+  // Optional: configure webhooks
+  webhooks: {
+    APP_UNINSTALLED: {
+      deliveryMethod: "http",
+      callbackUrl: "/webhooks",
+    },
+  },
+  
+  // Optional: lifecycle hooks
+  hooks: {
+    afterAuth: async ({ session }) => {
+      // Register webhooks after authentication
+      await shopify.registerWebhooks({ session });
+    },
+  },
+});
+
+export default shopify;
+export const authenticate = shopify.authenticate;
+```
+
+### 2. Add Authentication Routes
+
+Create `app/routes/auth.$.tsx`:
+
+```typescript
+import type { LoaderFunctionArgs } from "react-router";
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  await authenticate.admin(request);
+  return null;
+};
+```
+
+### 3. Authenticate Requests
+
+In your route loaders and actions:
+
+```typescript
+import type { LoaderFunctionArgs } from "react-router";
+import { data } from "react-router";
+import { useLoaderData } from "react-router";
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin, session } = await authenticate.admin(request);
+  
+  const response = await admin.graphql(
+    `#graphql
+      query {
+        products(first: 10) {
+          edges {
+            node {
+              id
+              title
+              handle
+            }
+          }
+        }
+      }
+    `
+  );
+  
+  const json = await response.json();
+  
+  return data({ products: json.data.products.edges });
+};
+
+export default function ProductsPage() {
+  const { products } = useLoaderData<typeof loader>();
+  
+  return (
+    <div>
+      {products.map(({ node }) => (
+        <div key={node.id}>{node.title}</div>
+      ))}
+    </div>
+  );
+}
+```
+
+## Configuration
+
+### shopifyApp Options
+
+<ParamField path="apiKey" type="string" required>
+  Your app's API key from the Partner Dashboard.
+  
+  Typically: `process.env.SHOPIFY_API_KEY`
+</ParamField>
+
+<ParamField path="apiSecretKey" type="string" required>
+  Your app's API secret from the Partner Dashboard.
+  
+  Typically: `process.env.SHOPIFY_API_SECRET`
+</ParamField>
+
+<ParamField path="scopes" type="string[]" required>
+  OAuth scopes your app needs.
+  
+  Example: `["read_products", "write_orders"]`
+</ParamField>
+
+<ParamField path="appUrl" type="string" required>
+  Your app's URL (including protocol).
+  
+  Example: `"https://myapp.example.com"` or `process.env.SHOPIFY_APP_URL`
+</ParamField>
+
+<ParamField path="apiVersion" type="string" required>
+  Shopify API version to use.
+  
+  Example: `"2024-01"`
+</ParamField>
+
+<ParamField path="sessionStorage" type="SessionStorage" required>
+  Session storage adapter.
+  
+  See [Session Storage](#session-storage) below.
+</ParamField>
+
+<ParamField path="distribution" type="AppDistribution" default="AppDistribution.AppStore">
+  App distribution type:
+  - `AppDistribution.AppStore`: Public app
+  - `AppDistribution.SingleMerchant`: Private app
+  - `AppDistribution.ShopifyAdmin`: Custom app in Shopify Admin
+</ParamField>
+
+<ParamField path="useOnlineTokens" type="boolean" default="false">
+  Whether to use online access tokens instead of offline.
+  
+  When `true`, both online and offline tokens are saved for background jobs.
+</ParamField>
+
+<ParamField path="webhooks" type="object">
+  Shop-specific webhook configuration.
+  
+  See [Webhooks](#webhooks) section.
+</ParamField>
+
+<ParamField path="hooks" type="object">
+  Lifecycle hooks.
+  
+  See [Lifecycle Hooks](#lifecycle-hooks) section.
+</ParamField>
+
+## Authentication
+
+### Admin Authentication
+
+Authenticate admin requests in loaders and actions:
+
+```typescript
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin, session, billing, cors } = await authenticate.admin(request);
+  
+  // admin: GraphQL/REST client
+  // session: Current session
+  // billing: Billing utilities
+  // cors: CORS helper
+  
+  return data({ shop: session.shop });
+};
+```
+
+<Accordion title="Admin Context Properties">
+  <ParamField path="admin" type="AdminApiContext">
+    API client for making Admin API requests.
+    
+    **Methods:**
+    - `admin.graphql()`: Make GraphQL requests
+    - `admin.rest`: Access REST API
+  </ParamField>
+  
+  <ParamField path="session" type="Session">
+    Current authenticated session.
+    
+    **Properties:**
+    - `session.shop`: Shop domain
+    - `session.accessToken`: Access token
+    - `session.scope`: Granted scopes
+  </ParamField>
+  
+  <ParamField path="billing" type="Billing">
+    Billing utilities for the current shop.
+    
+    **Methods:**
+    - `billing.require()`: Require active billing
+    - `billing.request()`: Request new subscription
+    - `billing.check()`: Check billing status
+  </ParamField>
+  
+  <ParamField path="cors" type="function">
+    Helper to add CORS headers to responses.
+  </ParamField>
+</Accordion>
+
+### GraphQL Requests
+
+<CodeGroup>
+```typescript Query
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  
+  const response = await admin.graphql(
+    `#graphql
+      query getProducts($first: Int!) {
+        products(first: $first) {
+          edges {
+            node {
+              id
+              title
+              handle
+            }
+          }
+        }
+      }
+    `,
+    {
+      variables: { first: 10 },
+    }
+  );
+  
+  const json = await response.json();
+  return data(json.data);
+};
+```
+
+```typescript Mutation
+import type { ActionFunctionArgs } from "react-router";
+import { data, redirect } from "react-router";
+import { GraphqlQueryError } from "@shopify/shopify-api";
+import { authenticate } from "~/shopify.server";
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  
+  try {
+    await admin.graphql(
+      `#graphql
+        mutation updateProductTitle($input: ProductInput!) {
+          productUpdate(input: $input) {
+            product {
+              id
+            }
+          }
+        }
+      `,
+      {
+        variables: {
+          input: { id: "123", title: "New title" },
+        },
+      }
+    );
+    
+    return redirect("/app/product-updated");
+  } catch (error) {
+    if (error instanceof GraphqlQueryError) {
+      return data({ errors: error.body?.errors }, { status: 500 });
+    }
+    
+    return new Response("Failed to update product", { status: 500 });
+  }
+};
+```
+</CodeGroup>
+
+### REST API Requests
+
+```typescript
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  
+  // Using REST client
+  const response = await admin.rest.get({ path: "products" });
+  const products = response.body.products;
+  
+  // Using REST resources (type-safe)
+  const productsTyped = await admin.rest.resources.Product.all({
+    session: admin.session,
+    limit: 10,
+  });
+  
+  return data({ products });
+};
+```
+
+### Webhook Authentication
+
+Handle incoming webhooks:
+
+```typescript
+// app/routes/webhooks.tsx
+import type { ActionFunctionArgs } from "react-router";
+import { authenticate } from "~/shopify.server";
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { topic, admin, payload, session } = await authenticate.webhook(request);
+  
+  // Session may be undefined if app is uninstalled
+  if (!session) {
+    throw new Response();
+  }
+  
+  switch (topic) {
+    case "PRODUCTS_UPDATE":
+      await admin.graphql(
+        `#graphql
+          mutation setMetafield($productId: ID!, $time: String!) {
+            metafieldsSet(metafields: {
+              ownerId: $productId
+              namespace: "my-app",
+              key: "webhook_received_at",
+              value: $time,
+              type: "string",
+            }) {
+              metafields {
+                key
+                value
+              }
+            }
+          }
+        `,
+        {
+          variables: {
+            productId: payload.admin_graphql_api_id,
+            time: new Date().toISOString(),
+          },
+        }
+      );
+      break;
+  }
+  
+  return new Response();
+};
+```
+
+### POS Authentication
+
+Authenticate Shopify POS requests:
+
+```typescript
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin, session } = await authenticate.pos(request);
+  
+  // Access POS-specific session data
+  return data({ shop: session.shop });
+};
+```
+
+### Public Authentication
+
+Handle public requests (App Proxy, Checkout UI Extensions):
+
+```typescript
+// App Proxy
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { liquid, storefront } = await authenticate.public.appProxy(request);
+  
+  // Make Storefront API requests
+  const response = await storefront.graphql(
+    `query { shop { name } }`
+  );
+  
+  // Return Liquid template
+  return liquid("<h1>{{ shop.name }}</h1>");
+};
+```
+
+## Webhooks
+
+### Registering Webhooks
+
+<Tabs>
+  <Tab title="In Configuration">
+    ```typescript
+    import { DeliveryMethod } from "@shopify/shopify-app-react-router/server";
+    
+    const shopify = shopifyApp({
+      // ... other config
+      webhooks: {
+        PRODUCTS_CREATE: {
+          deliveryMethod: DeliveryMethod.Http,
+          callbackUrl: "/webhooks",
+        },
+        ORDERS_PAID: {
+          deliveryMethod: DeliveryMethod.Http,
+          callbackUrl: "/webhooks",
+        },
+      },
+      hooks: {
+        afterAuth: async ({ session }) => {
+          // Register webhooks after OAuth
+          await shopify.registerWebhooks({ session });
+        },
+      },
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Manual Registration">
+    ```typescript
+    import shopify from "~/shopify.server";
+    
+    // In a loader or background job
+    export const loader = async ({ request }: LoaderFunctionArgs) => {
+      const { session } = await authenticate.admin(request);
+      
+      // Register all configured webhooks
+      const response = await shopify.registerWebhooks({ session });
+      
+      return data(response);
+    };
+    ```
+  </Tab>
+</Tabs>
+
+## Billing
+
+Handle app billing and subscriptions:
+
+### Configure Billing
+
+```typescript
+import { shopifyApp, BillingInterval } from "@shopify/shopify-app-react-router/server";
+
+const shopify = shopifyApp({
+  // ... other config
+  billing: {
+    "Premium Plan": {
+      amount: 10.0,
+      currencyCode: "USD",
+      interval: BillingInterval.Every30Days,
+      trialDays: 7,
+    },
+  },
+});
+```
+
+### Require Active Billing
+
+```typescript
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { billing } = await authenticate.admin(request);
+  
+  // Require active billing or redirect to payment
+  await billing.require({
+    plans: ["Premium Plan"],
+    onFailure: async () => billing.request({ plan: "Premium Plan" }),
+  });
+  
+  // User has active subscription
+  return data({ success: true });
+};
+```
+
+## Session Storage
+
+Choose a session storage adapter:
+
+<Tabs>
+  <Tab title="Prisma">
+    ```bash
+    npm install @shopify/shopify-app-session-storage-prisma
+    ```
+    
+    ```typescript
+    import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
+    import prisma from "~/db.server";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new PrismaSessionStorage(prisma),
+    });
+    ```
+  </Tab>
+  
+  <Tab title="PostgreSQL">
+    ```bash
+    npm install @shopify/shopify-app-session-storage-postgresql
+    ```
+    
+    ```typescript
+    import { PostgreSQLSessionStorage } from "@shopify/shopify-app-session-storage-postgresql";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new PostgreSQLSessionStorage(
+        "postgresql://user:pass@localhost/db"
+      ),
+    });
+    ```
+  </Tab>
+  
+  <Tab title="DynamoDB">
+    ```bash
+    npm install @shopify/shopify-app-session-storage-dynamodb
+    ```
+    
+    ```typescript
+    import { DynamoDBSessionStorage } from "@shopify/shopify-app-session-storage-dynamodb";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new DynamoDBSessionStorage({
+        tableName: "shopify-sessions",
+        config: { region: "us-east-1" },
+      }),
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Lifecycle Hooks
+
+```typescript
+const shopify = shopifyApp({
+  // ... other config
+  hooks: {
+    afterAuth: async ({ session, admin }) => {
+      // Called after successful OAuth
+      console.log(`Shop ${session.shop} installed the app`);
+      
+      // Register webhooks
+      await shopify.registerWebhooks({ session });
+      
+      // Create initial data
+      await admin.graphql(
+        `mutation { /* setup query */ }`
+      );
+    },
+  },
+});
+```
+
+## Error Handling
+
+Handle authentication errors:
+
+```typescript
+import { boundary } from "@shopify/shopify-app-react-router/server";
+
+// Error boundary for authentication errors
+export const ErrorBoundary = boundary.error;
+```
+
+## React Router v7 Features
+
+### Type-Safe Routes
+
+React Router v7 provides type-safe routing:
+
+```typescript
+import type { Route } from "./+types/products";
+
+export const loader = async ({ request }: Route.LoaderArgs) => {
+  const { admin } = await authenticate.admin(request);
+  // Fully typed loader
+};
+
+export default function Products({ loaderData }: Route.ComponentProps) {
+  // Fully typed component props
+  return <div>{loaderData.products}</div>;
+}
+```
+
+### Server-Side Rendering
+
+React Router v7 supports SSR out of the box:
+
+```typescript
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  
+  const response = await admin.graphql(`query { shop { name } }`);
+  const json = await response.json();
+  
+  // Data is available during SSR
+  return data({ shopName: json.data.shop.name });
+};
+```
+
+## Key Differences from Remix
+
+<Note>
+  The React Router adapter uses **token exchange authentication** by default, providing a more modern authentication experience.
+</Note>
+
+<CardGroup cols={2}>
+  <Card title="Token Exchange" icon="lock">
+    Uses Shopify's token exchange for authentication (no authorization code flow)
+  </Card>
+  <Card title="POS Support" icon="mobile">
+    Built-in support for Shopify POS authentication
+  </Card>
+  <Card title="React Router v7" icon="route">
+    Leverages React Router v7's type-safe routing
+  </Card>
+  <Card title="Same API" icon="code">
+    Otherwise identical API to Remix adapter
+  </Card>
+</CardGroup>
+
+<Warning>
+  Always use `authenticate.admin()` in routes that require authentication to ensure proper session validation.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core API" icon="code" href="/app-libraries/shopify-api">
+    Learn about @shopify/shopify-api
+  </Card>
+  <Card title="Remix Adapter" icon="react" href="/app-libraries/shopify-app-remix">
+    Compare with Remix adapter
+  </Card>
+  <Card title="React Router Docs" icon="book" href="https://reactrouter.com">
+    React Router documentation
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/Shopify/shopify-app-js/tree/main/packages/apps/shopify-app-react-router">
+    View on GitHub
+  </Card>
+</CardGroup>

@@ -1,0 +1,433 @@
+---
+title: Webhooks
+description: Learn how to register, validate, and process Shopify webhooks
+---
+
+This guide covers webhook registration, validation, and processing using the Shopify API library.
+
+## Overview
+
+The library supports multiple webhook delivery methods:
+
+- **HTTP** - Webhooks delivered to your app's endpoint
+- **EventBridge** - AWS EventBridge delivery
+- **PubSub** - Google Cloud Pub/Sub delivery
+
+<Note>
+For most apps, we recommend using **app-specific webhooks** configured in your `shopify.app.toml` file instead of registering webhooks programmatically. Only use `webhooks.addHandlers` and `webhooks.register` if you need shop-specific webhook configurations.
+</Note>
+
+## Adding Webhook Handlers
+
+Register webhook handlers when initializing your app:
+
+```typescript
+import {shopifyApi, DeliveryMethod} from '@shopify/shopify-api';
+
+const shopify = shopifyApi({...});
+
+shopify.webhooks.addHandlers({
+  PRODUCTS_CREATE: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: '/webhooks/products/create',
+    callback: async (topic, shop, body, webhookId, apiVersion, subTopic) => {
+      const payload = JSON.parse(body);
+      console.log('Product created:', payload.id);
+    },
+  },
+  ORDERS_PAID: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: '/webhooks/orders/paid',
+    callback: async (topic, shop, body) => {
+      const order = JSON.parse(body);
+      // Process paid order
+    },
+  },
+});
+```
+
+Source: `lib/webhooks/registry.ts:20-37`
+
+### Delivery Methods
+
+<Tabs>
+  <Tab title="HTTP">
+    ```typescript
+    {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: '/webhooks/products/create',
+      callback: async (topic, shop, body, webhookId, apiVersion) => {
+        // Handle webhook
+      },
+    }
+    ```
+
+    The `callbackUrl` can be:
+    - Relative path: `/webhooks/products/create` (uses configured host)
+    - Absolute URL: `https://example.com/webhooks/products/create`
+
+    Source: `lib/webhooks/registry.ts:71-80`
+  </Tab>
+
+  <Tab title="EventBridge">
+    ```typescript
+    {
+      deliveryMethod: DeliveryMethod.EventBridge,
+      arn: 'arn:aws:events:us-east-1:123456789012:event-bus/my-bus',
+    }
+    ```
+
+    Events are sent to your AWS EventBridge event bus.
+  </Tab>
+
+  <Tab title="PubSub">
+    ```typescript
+    {
+      deliveryMethod: DeliveryMethod.PubSub,
+      pubSubProject: 'my-project-id',
+      pubSubTopic: 'shopify-webhooks',
+    }
+    ```
+
+    Events are published to your Google Cloud Pub/Sub topic.
+  </Tab>
+</Tabs>
+
+## Registering Webhooks
+
+After adding handlers, register them with Shopify:
+
+```typescript
+app.get('/webhooks/register', async (req, res) => {
+  const session = await loadSession(req);
+  
+  const response = await shopify.webhooks.register({session});
+  
+  console.log('Registration results:', response);
+  res.json(response);
+});
+```
+
+**Registration Response:**
+
+```typescript
+interface RegisterReturn {
+  [topic: string]: RegisterResult[];
+}
+
+interface RegisterResult {
+  deliveryMethod: DeliveryMethod;
+  success: boolean;
+  result: any;
+  operation: 'create' | 'update' | 'delete';
+}
+```
+
+Source: `lib/webhooks/register.ts:46-112`
+
+<Note>
+The `register` function automatically:
+- Creates new webhook subscriptions
+- Updates existing subscriptions if fields changed
+- Deletes subscriptions that are no longer needed
+
+Source: `lib/webhooks/register.ts:233-281`
+</Note>
+
+## Validating Webhooks
+
+Always validate incoming webhooks to ensure they're from Shopify:
+
+```typescript
+app.post('/webhooks/products/create', async (req, res) => {
+  const rawBody = await getRawBody(req); // Get raw request body
+  
+  const validationResult = await shopify.webhooks.validate({
+    rawBody,
+    rawRequest: req,
+    rawResponse: res,
+  });
+
+  if (!validationResult.valid) {
+    console.error('Invalid webhook:', validationResult.reason);
+    return res.status(401).send('Unauthorized');
+  }
+
+  // Webhook is valid
+  console.log('Topic:', validationResult.topic);
+  console.log('Shop:', validationResult.domain);
+  console.log('Webhook ID:', validationResult.webhookId);
+  
+  res.status(200).send('OK');
+});
+```
+
+**Validation Response:**
+
+```typescript
+interface WebhookValidationValid {
+  valid: true;
+  webhookType: 'webhooks' | 'events';
+  topic: string;
+  domain: string;
+  apiVersion: string;
+  webhookId: string;
+  hmac: string;
+}
+
+interface WebhookValidationInvalid {
+  valid: false;
+  reason: 'missing_headers' | 'missing_body' | 'invalid_hmac';
+  missingHeaders?: string[];
+}
+```
+
+Source: `lib/webhooks/validate.ts:46-75`
+
+### Validation Process
+
+The library validates:
+
+1. **Required headers** - `X-Shopify-Hmac-SHA256`, `X-Shopify-Topic`, etc.
+2. **HMAC signature** - Verifies the webhook is from Shopify
+3. **Request body** - Ensures body is present
+
+Source: `lib/webhooks/validate.ts:89-149`
+
+<Warning>
+**Important:** Webhooks manually triggered from the Shopify admin will fail HMAC validation. Use the Shopify CLI or real events to test webhooks in development.
+
+Source: `lib/webhooks/validate.ts:64-69`
+</Warning>
+
+## Processing Webhooks
+
+The `process` function validates and calls your webhook handlers automatically:
+
+```typescript
+app.post('/webhooks/*', async (req, res) => {
+  const rawBody = await getRawBody(req);
+  
+  try {
+    await shopify.webhooks.process({
+      rawBody,
+      rawRequest: req,
+      rawResponse: res,
+      context: {userId: req.user?.id}, // Optional context
+    });
+  } catch (error) {
+    console.error('Webhook processing failed:', error);
+    return res.status(500).send('Error');
+  }
+});
+```
+
+**How it works:**
+
+1. Validates the webhook HMAC and headers
+2. Extracts the topic from headers
+3. Finds matching handlers for the topic
+4. Calls each handler's `callback` function
+5. Returns appropriate HTTP status codes
+
+Source: `lib/webhooks/process.ts:43-97`
+
+### Handler Callback Signature
+
+```typescript
+type WebhookCallback = (
+  topic: string,
+  shop: string,
+  body: string,        // Raw JSON string
+  webhookId: string,
+  apiVersion: string,
+  subTopic?: string,
+  context?: any,       // Optional context from process()
+) => Promise<void>;
+```
+
+Source: `lib/webhooks/process.ts:99-172`
+
+## Advanced Options
+
+### Include Fields
+
+Limit webhook payload to specific fields:
+
+```typescript
+shopify.webhooks.addHandlers({
+  PRODUCTS_UPDATE: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: '/webhooks/products/update',
+    includeFields: ['id', 'title', 'variants'],
+    callback: async (topic, shop, body) => {
+      // Body only contains id, title, and variants
+    },
+  },
+});
+```
+
+### Metafield Namespaces
+
+Include specific metafield namespaces in the webhook:
+
+```typescript
+shopify.webhooks.addHandlers({
+  PRODUCTS_CREATE: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: '/webhooks/products/create',
+    metafieldNamespaces: ['custom', 'inventory'],
+    callback: async (topic, shop, body) => {
+      // Includes metafields from 'custom' and 'inventory' namespaces
+    },
+  },
+});
+```
+
+Source: `lib/webhooks/registry.ts:90-92`
+
+## Privacy Webhooks
+
+Privacy webhooks (GDPR) must be handled separately:
+
+```typescript
+const PRIVACY_TOPICS = [
+  'CUSTOMERS_DATA_REQUEST',
+  'CUSTOMERS_REDACT',
+  'SHOP_REDACT',
+];
+
+app.post('/webhooks/gdpr/:topic', async (req, res) => {
+  const rawBody = await getRawBody(req);
+  const topic = req.params.topic.toUpperCase();
+  
+  const validation = await shopify.webhooks.validate({
+    rawBody,
+    rawRequest: req,
+    rawResponse: res,
+  });
+
+  if (!validation.valid) {
+    return res.status(401).send('Unauthorized');
+  }
+
+  const payload = JSON.parse(rawBody);
+  
+  switch (topic) {
+    case 'CUSTOMERS_DATA_REQUEST':
+      // Return customer data
+      break;
+    case 'CUSTOMERS_REDACT':
+      // Delete customer data
+      break;
+    case 'SHOP_REDACT':
+      // Delete shop data (48 hours after uninstall)
+      break;
+  }
+  
+  res.status(200).send('OK');
+});
+```
+
+<Note>
+Privacy webhooks are automatically skipped during `webhooks.register()` because they must be configured in the Partner Dashboard.
+
+Source: `lib/webhooks/register.ts:76-78`
+</Note>
+
+## Error Handling
+
+```typescript
+import {InvalidWebhookError} from '@shopify/shopify-api';
+
+try {
+  await shopify.webhooks.process({...});
+} catch (error) {
+  if (error instanceof InvalidWebhookError) {
+    console.error('Webhook error:', error.message);
+    console.error('Response:', error.response);
+  }
+}
+```
+
+Source: `lib/error.ts:99-110`
+
+## Complete Example
+
+<CodeGroup>
+```typescript Setup
+import express from 'express';
+import {shopifyApi, DeliveryMethod} from '@shopify/shopify-api';
+
+const shopify = shopifyApi({...});
+const app = express();
+
+// Add webhook handlers
+shopify.webhooks.addHandlers({
+  PRODUCTS_CREATE: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: '/webhooks/products/create',
+    callback: productCreateHandler,
+  },
+  ORDERS_PAID: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: '/webhooks/orders/paid',
+    callback: orderPaidHandler,
+  },
+});
+
+async function productCreateHandler(topic, shop, body) {
+  const product = JSON.parse(body);
+  console.log(`New product ${product.id} in ${shop}`);
+}
+
+async function orderPaidHandler(topic, shop, body) {
+  const order = JSON.parse(body);
+  console.log(`Order ${order.id} paid in ${shop}`);
+}
+```
+
+```typescript Process
+import {getRawBody} from './utils';
+
+// Single endpoint for all webhooks
+app.post('/webhooks/*', async (req, res) => {
+  const rawBody = await getRawBody(req);
+  
+  try {
+    await shopify.webhooks.process({
+      rawBody,
+      rawRequest: req,
+      rawResponse: res,
+    });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    return res.status(500).send('Error');
+  }
+});
+```
+
+```typescript Register
+// Register webhooks after OAuth
+app.get('/auth/callback', async (req, res) => {
+  const {session} = await shopify.auth.callback({...});
+  
+  // Register webhooks for this shop
+  const webhookResponse = await shopify.webhooks.register({session});
+  
+  console.log('Webhooks registered:', webhookResponse);
+  
+  res.redirect(`/?shop=${session.shop}`);
+});
+```
+</CodeGroup>
+
+## Best Practices
+
+<Tip>
+- Always validate webhooks before processing
+- Return 200 OK immediately, process asynchronously
+- Store raw body for validation - don't parse before validating
+- Use app-specific webhooks (shopify.app.toml) when possible
+- Handle webhook retries idempotently
+</Tip>

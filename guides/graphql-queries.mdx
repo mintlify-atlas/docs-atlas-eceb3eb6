@@ -1,0 +1,511 @@
+---
+title: GraphQL Queries
+description: Learn how to make GraphQL queries to the Shopify Admin API
+---
+
+This guide covers making GraphQL queries and mutations using the Shopify Admin API client.
+
+## Creating a GraphQL Client
+
+Create a GraphQL client using a session:
+
+```typescript
+const client = new shopify.clients.Graphql({session});
+```
+
+You can optionally override the API version:
+
+```typescript
+const client = new shopify.clients.Graphql({
+  session,
+  apiVersion: '2024-01',
+});
+```
+
+Source: `lib/clients/admin/graphql/client.ts:38-67`
+
+## Making Queries
+
+Use the `request()` method to execute GraphQL operations:
+
+```typescript
+const response = await client.request(
+  `query getProduct($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      description
+      variants(first: 10) {
+        edges {
+          node {
+            id
+            price
+            sku
+          }
+        }
+      }
+    }
+  }`,
+  {
+    variables: {
+      id: 'gid://shopify/Product/1234567890',
+    },
+  }
+);
+
+console.log(response.data.product);
+```
+
+Source: `lib/clients/admin/graphql/client.ts:110-144`
+
+### Response Structure
+
+```typescript
+interface GraphQLClientResponse<T> {
+  data: T;                    // Query response data
+  headers: Headers;           // Response headers
+  errors?: {
+    response: Response;       // Fetch Response object
+    graphQLErrors?: any[];    // GraphQL errors
+    networkStatusCode?: number;
+  };
+}
+```
+
+## Mutations
+
+Mutations work the same way as queries:
+
+```typescript
+const response = await client.request(
+  `mutation updateProduct($input: ProductInput!) {
+    productUpdate(input: $input) {
+      product {
+        id
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }`,
+  {
+    variables: {
+      input: {
+        id: 'gid://shopify/Product/1234567890',
+        title: 'Updated Product Title',
+      },
+    },
+  }
+);
+
+if (response.data.productUpdate.userErrors.length > 0) {
+  console.error('Errors:', response.data.productUpdate.userErrors);
+} else {
+  console.log('Product updated:', response.data.productUpdate.product);
+}
+```
+
+## Request Options
+
+The `request()` method accepts additional options:
+
+```typescript
+const response = await client.request(
+  operation,
+  {
+    variables: {...},
+    headers: {
+      'X-Custom-Header': 'value',
+    },
+    retries: 2,
+  }
+);
+```
+
+**Options:**
+- `variables` - GraphQL variables object
+- `headers` - Additional headers to send
+- `retries` - Number of retry attempts on failure
+- `apiVersion` - Override the API version for this request
+
+Source: `lib/clients/admin/graphql/client.ts:110-128`
+
+## Error Handling
+
+GraphQL requests can fail in multiple ways:
+
+```typescript
+import {GraphqlQueryError} from '@shopify/shopify-api';
+
+try {
+  const response = await client.request(operation);
+  
+  // Check for GraphQL errors in response
+  if (response.errors) {
+    console.error('GraphQL Errors:', response.errors.graphQLErrors);
+  }
+} catch (error) {
+  if (error instanceof GraphqlQueryError) {
+    console.error('Query failed:', error.message);
+    console.error('Response:', error.response);
+    console.error('Body:', error.body);
+  }
+}
+```
+
+Source: `lib/error.ts:74-92`
+
+### Error Types
+
+The client throws errors when:
+- Network request fails
+- Response is not OK (status >= 400)
+- GraphQL returns errors
+
+Source: `lib/clients/admin/graphql/client.ts:130-134`
+
+## Pagination
+
+Use cursor-based pagination for lists:
+
+```typescript
+let hasNextPage = true;
+let cursor = null;
+const allProducts = [];
+
+while (hasNextPage) {
+  const response = await client.request(
+    `query getProducts($cursor: String) {
+      products(first: 50, after: $cursor) {
+        edges {
+          node {
+            id
+            title
+          }
+          cursor
+        }
+        pageInfo {
+          hasNextPage
+        }
+      }
+    }`,
+    {
+      variables: {cursor},
+    }
+  );
+
+  const {edges, pageInfo} = response.data.products;
+  allProducts.push(...edges.map(edge => edge.node));
+  
+  hasNextPage = pageInfo.hasNextPage;
+  cursor = edges[edges.length - 1]?.cursor;
+}
+
+console.log(`Fetched ${allProducts.length} products`);
+```
+
+## Fragments
+
+Use GraphQL fragments to reuse field selections:
+
+```typescript
+const PRODUCT_FRAGMENT = `
+  fragment ProductFields on Product {
+    id
+    title
+    description
+    status
+    variants(first: 10) {
+      edges {
+        node {
+          id
+          price
+          sku
+        }
+      }
+    }
+  }
+`;
+
+const response = await client.request(
+  `${PRODUCT_FRAGMENT}
+  query getProduct($id: ID!) {
+    product(id: $id) {
+      ...ProductFields
+    }
+  }`,
+  {
+    variables: {id: 'gid://shopify/Product/123'},
+  }
+);
+```
+
+## Bulk Operations
+
+For large datasets, use bulk operations:
+
+```typescript
+// Start bulk operation
+const startResponse = await client.request(
+  `mutation {
+    bulkOperationRunQuery(
+      query: """
+      {
+        products {
+          edges {
+            node {
+              id
+              title
+            }
+          }
+        }
+      }
+      """
+    ) {
+      bulkOperation {
+        id
+        status
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }`
+);
+
+const operationId = startResponse.data.bulkOperationRunQuery.bulkOperation.id;
+
+// Poll for completion
+let status = 'RUNNING';
+while (status === 'RUNNING') {
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
+  const statusResponse = await client.request(
+    `query getBulkOperation($id: ID!) {
+      node(id: $id) {
+        ... on BulkOperation {
+          id
+          status
+          objectCount
+          url
+        }
+      }
+    }`,
+    {variables: {id: operationId}}
+  );
+  
+  status = statusResponse.data.node.status;
+}
+
+// Download results from url
+const resultsUrl = statusResponse.data.node.url;
+```
+
+## Rate Limiting
+
+The client automatically handles rate limits with retries:
+
+```typescript
+const response = await client.request(
+  operation,
+  {
+    retries: 3, // Retry up to 3 times on throttling
+  }
+);
+```
+
+Check rate limit status in headers:
+
+```typescript
+const response = await client.request(operation);
+
+console.log('Cost:', response.headers['x-graphql-cost-include-fields']);
+console.log('Throttle:', response.headers['x-shopify-api-request-failure-reauthorize']);
+```
+
+## TypeScript Support
+
+Use type parameters for typed responses:
+
+```typescript
+interface ProductData {
+  product: {
+    id: string;
+    title: string;
+    variants: {
+      edges: Array<{
+        node: {
+          id: string;
+          price: string;
+        };
+      }>;
+    };
+  };
+}
+
+const response = await client.request<ProductData>(
+  `query getProduct($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      variants(first: 10) {
+        edges {
+          node {
+            id
+            price
+          }
+        }
+      }
+    }
+  }`,
+  {variables: {id: 'gid://shopify/Product/123'}}
+);
+
+// response.data is typed as ProductData
+console.log(response.data.product.title);
+```
+
+## Complete Example
+
+<CodeGroup>
+```typescript Query
+import {shopifyApi} from '@shopify/shopify-api';
+
+const shopify = shopifyApi({...});
+
+app.get('/api/products/:id', async (req, res) => {
+  const session = await loadSession(req);
+  const client = new shopify.clients.Graphql({session});
+  
+  try {
+    const response = await client.request(
+      `query getProduct($id: ID!) {
+        product(id: $id) {
+          id
+          title
+          description
+          variants(first: 10) {
+            edges {
+              node {
+                id
+                title
+                price
+              }
+            }
+          }
+        }
+      }`,
+      {
+        variables: {
+          id: `gid://shopify/Product/${req.params.id}`,
+        },
+      }
+    );
+    
+    res.json(response.data.product);
+  } catch (error) {
+    console.error('Query failed:', error);
+    res.status(500).json({error: 'Failed to fetch product'});
+  }
+});
+```
+
+```typescript Mutation
+app.post('/api/products/:id', async (req, res) => {
+  const session = await loadSession(req);
+  const client = new shopify.clients.Graphql({session});
+  
+  const response = await client.request(
+    `mutation updateProduct($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product {
+          id
+          title
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }`,
+    {
+      variables: {
+        input: {
+          id: `gid://shopify/Product/${req.params.id}`,
+          title: req.body.title,
+          description: req.body.description,
+        },
+      },
+    }
+  );
+  
+  const {product, userErrors} = response.data.productUpdate;
+  
+  if (userErrors.length > 0) {
+    return res.status(400).json({errors: userErrors});
+  }
+  
+  res.json(product);
+});
+```
+
+```typescript Pagination
+app.get('/api/products/all', async (req, res) => {
+  const session = await loadSession(req);
+  const client = new shopify.clients.Graphql({session});
+  
+  const allProducts = [];
+  let hasNextPage = true;
+  let cursor = null;
+  
+  while (hasNextPage) {
+    const response = await client.request(
+      `query getProducts($cursor: String) {
+        products(first: 50, after: $cursor) {
+          edges {
+            node {
+              id
+              title
+            }
+            cursor
+          }
+          pageInfo {
+            hasNextPage
+          }
+        }
+      }`,
+      {variables: {cursor}}
+    );
+    
+    const {edges, pageInfo} = response.data.products;
+    allProducts.push(...edges.map(e => e.node));
+    
+    hasNextPage = pageInfo.hasNextPage;
+    cursor = edges[edges.length - 1]?.cursor;
+  }
+  
+  res.json({products: allProducts, total: allProducts.length});
+});
+```
+</CodeGroup>
+
+## Best Practices
+
+<Tip>
+- Use variables instead of string interpolation
+- Implement pagination for large result sets
+- Handle both GraphQL and network errors
+- Check `userErrors` in mutation responses
+- Use fragments to avoid repeating field selections
+- Set appropriate retry counts for production
+- Monitor GraphQL cost in response headers
+</Tip>
+
+<Warning>
+The GraphQL client requires a valid access token. Missing access tokens will throw a `MissingRequiredArgument` error.
+
+Source: `lib/clients/admin/graphql/client.ts:41-45`
+</Warning>

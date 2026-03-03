@@ -1,122 +1,111 @@
 {
   "$schema": "https://mintlify.com/docs.json",
+  "name": "Shopify App JavaScript",
   "theme": "mint",
-  "name": "Mint Starter Kit",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#96BF48",
+    "light": "#B4D66E",
+    "dark": "#7A9F3A"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Shopify/shopify-app-js"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Shopify/shopify-app-js"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
               "index",
               "quickstart",
-              "development"
+              "choosing-a-package"
             ]
           },
           {
-            "group": "Customization",
+            "group": "API Clients",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "api-clients/overview",
+              "api-clients/admin-api-client",
+              "api-clients/storefront-api-client",
+              "api-clients/graphql-client",
+              "api-clients/api-codegen-preset"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "App Libraries",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "app-libraries/overview",
+              "app-libraries/shopify-api",
+              "app-libraries/shopify-app-remix",
+              "app-libraries/shopify-app-express",
+              "app-libraries/shopify-app-react-router"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Session Storage",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "session-storage/overview",
+              "session-storage/session-storage-interface",
+              "session-storage/adapters"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/authentication",
+              "guides/webhooks",
+              "guides/billing",
+              "guides/graphql-queries",
+              "guides/rest-resources",
+              "guides/session-management",
+              "guides/error-handling"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Core API",
             "pages": [
-              "api-reference/introduction"
+              "api-reference/shopify-api/shopify-api",
+              "api-reference/shopify-api/configuration",
+              "api-reference/shopify-api/auth",
+              "api-reference/shopify-api/clients",
+              "api-reference/shopify-api/webhooks",
+              "api-reference/shopify-api/billing"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "API Clients",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api-reference/admin-api-client",
+              "api-reference/admin-rest-api-client",
+              "api-reference/storefront-api-client",
+              "api-reference/graphql-client"
+            ]
+          },
+          {
+            "group": "Framework Adapters",
+            "pages": [
+              "api-reference/shopify-app-remix",
+              "api-reference/shopify-app-express",
+              "api-reference/shopify-app-react-router"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

@@ -1,0 +1,331 @@
+---
+title: 'shopifyApi()'
+description: 'Initialize the Shopify API library with your app configuration'
+---
+
+## Overview
+
+The `shopifyApi()` function is the main entry point for the Shopify API library. It initializes and returns a configured Shopify API instance with all available API clients, authentication handlers, webhook utilities, and billing functions.
+
+## Function Signature
+
+```typescript
+function shopifyApi<
+  Params extends ConfigParams<Resources, Future>,
+  Resources extends ShopifyRestResources,
+  Future extends FutureFlagOptions,
+>({
+  future,
+  restResources,
+  ...config
+}: {future?: Future; restResources?: Resources} & Params): Shopify<
+  Params,
+  Resources,
+  Future
+>
+```
+
+## Parameters
+
+<ParamField path="apiKey" type="string">
+  The API key for your app (also known as Client ID in your Partner Dashboard).
+  
+  **Optional** for custom store apps when `isCustomStoreApp` is `true`.
+</ParamField>
+
+<ParamField path="apiSecretKey" type="string" required>
+  The API secret key for your app (also known as Client Secret in your Partner Dashboard).
+</ParamField>
+
+<ParamField path="scopes" type="string[] | AuthScopes">
+  The scopes your app needs to access the API.
+  
+  **Not required** if using Shopify managed installation or when `isCustomStoreApp` is `true`.
+</ParamField>
+
+<ParamField path="hostName" type="string" required>
+  The host name of your app (e.g., `my-app.example.com`).
+</ParamField>
+
+<ParamField path="hostScheme" type="'http' | 'https'" default="'https'">
+  The scheme to use for the app host.
+</ParamField>
+
+<ParamField path="apiVersion" type="ApiVersion" required>
+  The API version to use.
+  
+  Available versions:
+  - `ApiVersion.October24` - `'2024-10'`
+  - `ApiVersion.January25` - `'2025-01'`
+  - `ApiVersion.April25` - `'2025-04'`
+  - `ApiVersion.July25` - `'2025-07'`
+  - `ApiVersion.October25` - `'2025-10'`
+  - `ApiVersion.January26` - `'2026-01'`
+  - `ApiVersion.April26` - `'2026-04'`
+  - `ApiVersion.Unstable` - `'unstable'`
+</ParamField>
+
+<ParamField path="isEmbeddedApp" type="boolean" required>
+  Whether the app is embedded in the Shopify admin.
+</ParamField>
+
+<ParamField path="isCustomStoreApp" type="boolean" default="false">
+  Whether the app is a Shopify admin custom store app.
+  
+  [Learn more about app distribution](https://shopify.dev/docs/apps/distribution)
+</ParamField>
+
+<ParamField path="adminApiAccessToken" type="string">
+  An app-wide API access token. Only applies to custom apps.
+</ParamField>
+
+<ParamField path="privateAppStorefrontAccessToken" type="string">
+  An app-wide API access token for the storefront API. Only applies to custom apps.
+</ParamField>
+
+<ParamField path="userAgentPrefix" type="string">
+  The user agent prefix to use for API requests.
+</ParamField>
+
+<ParamField path="domainTransformations" type="DomainTransformation[]">
+  Custom domain transformations for split-domain architectures.
+  
+  Transformations are applied in order. The first matching transformation is used.
+  If no transformation matches, the domain is validated as-is.
+  
+  ```typescript
+  // Simple template-based transformation
+  domainTransformations: [{
+    match: /^([a-zA-Z0-9][a-zA-Z0-9-_]*)\.my\.shop\.dev$/,
+    transform: '$1.dev-api.shop.dev'
+  }]
+  
+  // Function-based transformation with custom logic
+  domainTransformations: [{
+    match: /^([^.]+)\.ui\.example\.com$/,
+    transform: (matches) => {
+      const shopName = matches[1];
+      return shopName.startsWith('test-')
+        ? `${shopName}.api-staging.example.com`
+        : `${shopName}.api.example.com`;
+    }
+  }]
+  ```
+</ParamField>
+
+<ParamField path="billing" type="BillingConfig">
+  Billing configurations for the app. See the [Billing API reference](/api-reference/shopify-api/billing) for details.
+</ParamField>
+
+<ParamField path="restResources" type="ShopifyRestResources">
+  REST resources to access the Admin API.
+  
+  You can import these from `@shopify/shopify-api/rest/admin/*`.
+</ParamField>
+
+<ParamField path="logger" type="object">
+  Customization options for Shopify logs.
+  
+  <Expandable title="Logger Options">
+    <ResponseField name="log" type="LogFunction">
+      A custom log function with signature: `(severity: LogSeverity, msg: string) => void`
+    </ResponseField>
+    
+    <ResponseField name="level" type="LogSeverity">
+      The minimum severity level to log.
+      - `LogSeverity.Error` (0)
+      - `LogSeverity.Warning` (1)
+      - `LogSeverity.Info` (2)
+      - `LogSeverity.Debug` (3)
+    </ResponseField>
+    
+    <ResponseField name="httpRequests" type="boolean" default="false">
+      Whether to log HTTP requests.
+    </ResponseField>
+    
+    <ResponseField name="timestamps" type="boolean" default="false">
+      Whether to log timestamps.
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="future" type="FutureFlagOptions">
+  Future flags to include for this app. These enable experimental features.
+</ParamField>
+
+<ParamField path="isTesting" type="boolean" default="false">
+  Whether the app is initialized for local testing.
+</ParamField>
+
+## Return Value
+
+Returns a `Shopify` object with the following properties:
+
+<ResponseField name="config" type="ConfigInterface">
+  The validated configuration object.
+</ResponseField>
+
+<ResponseField name="clients" type="ShopifyClients">
+  Client classes for making API requests. See [Clients API reference](/api-reference/shopify-api/clients).
+  
+  - `Rest` - REST API client class
+  - `Graphql` - GraphQL API client class
+  - `Storefront` - Storefront API client class
+  - `graphqlProxy` - GraphQL proxy function
+</ResponseField>
+
+<ResponseField name="auth" type="ShopifyAuth">
+  Authentication handlers. See [Auth API reference](/api-reference/shopify-api/auth).
+  
+  - `begin` - Start OAuth flow
+  - `callback` - Complete OAuth flow
+  - `tokenExchange` - Token exchange for embedded apps
+  - `clientCredentials` - Client credentials flow
+  - `refreshToken` - Refresh access tokens
+  - `migrateToExpiringToken` - Migrate to expiring tokens
+  - `nonce` - Generate secure nonces
+  - `safeCompare` - Constant-time string comparison
+  - `getEmbeddedAppUrl` - Get embedded app URL
+  - `buildEmbeddedAppUrl` - Build embedded app URL
+</ResponseField>
+
+<ResponseField name="session" type="ShopifySession">
+  Session management utilities.
+</ResponseField>
+
+<ResponseField name="utils" type="ShopifyUtils">
+  Utility functions for working with Shopify data.
+</ResponseField>
+
+<ResponseField name="webhooks" type="ShopifyWebhooks">
+  Webhook handlers. See [Webhooks API reference](/api-reference/shopify-api/webhooks).
+  
+  - `addHandlers` - Add shop-specific webhook handlers
+  - `register` - Register webhooks with Shopify
+  - `process` - Process webhook requests
+  - `validate` - Validate webhook requests
+  - `getTopicsAdded` - Get registered topics
+  - `getHandlers` - Get handlers for a topic
+</ResponseField>
+
+<ResponseField name="billing" type="ShopifyBilling">
+  Billing functions. See [Billing API reference](/api-reference/shopify-api/billing).
+  
+  - `check` - Check billing status
+  - `request` - Request payment
+  - `cancel` - Cancel subscription
+  - `subscriptions` - Get active subscriptions
+  - `createUsageRecord` - Create usage record
+  - `updateUsageCappedAmount` - Update usage cap
+</ResponseField>
+
+<ResponseField name="logger" type="ShopifyLogger">
+  Logger instance for logging app events.
+</ResponseField>
+
+<ResponseField name="rest" type="Resources">
+  REST resource classes (if `restResources` was provided).
+</ResponseField>
+
+<ResponseField name="flow" type="ShopifyFlow">
+  Shopify Flow utilities.
+</ResponseField>
+
+<ResponseField name="fulfillmentService" type="FulfillmentService">
+  Fulfillment service utilities.
+</ResponseField>
+
+## Example
+
+<CodeGroup>
+```typescript Basic Setup
+import { shopifyApi, ApiVersion, LogSeverity } from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  apiKey: process.env.SHOPIFY_API_KEY,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET,
+  scopes: ['read_products', 'write_products'],
+  hostName: process.env.HOST.replace(/https:\/\//, ''),
+  hostScheme: 'https',
+  apiVersion: ApiVersion.April25,
+  isEmbeddedApp: true,
+  logger: {
+    level: LogSeverity.Info,
+    httpRequests: true,
+    timestamps: true,
+  },
+});
+
+// Use the configured instance
+const session = await shopify.auth.callback({
+  rawRequest: req,
+  rawResponse: res,
+});
+```
+
+```typescript With REST Resources
+import { shopifyApi, ApiVersion } from '@shopify/shopify-api';
+import { restResources } from '@shopify/shopify-api/rest/admin/2025-01';
+
+const shopify = shopifyApi({
+  apiKey: process.env.SHOPIFY_API_KEY,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET,
+  scopes: ['read_products'],
+  hostName: process.env.HOST.replace(/https:\/\//, ''),
+  apiVersion: ApiVersion.January25,
+  isEmbeddedApp: true,
+  restResources,
+});
+
+// Use REST resources
+const products = await shopify.rest.Product.all({
+  session,
+});
+```
+
+```typescript Custom Store App
+import { shopifyApi, ApiVersion } from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  apiSecretKey: process.env.SHOPIFY_API_SECRET,
+  hostName: process.env.HOST.replace(/https:\/\//, ''),
+  apiVersion: ApiVersion.April25,
+  isEmbeddedApp: false,
+  isCustomStoreApp: true,
+  adminApiAccessToken: process.env.ADMIN_API_ACCESS_TOKEN,
+});
+```
+
+```typescript With Domain Transformations
+import { shopifyApi, ApiVersion } from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  apiKey: process.env.SHOPIFY_API_KEY,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET,
+  scopes: ['read_products'],
+  hostName: process.env.HOST.replace(/https:\/\//, ''),
+  apiVersion: ApiVersion.April25,
+  isEmbeddedApp: true,
+  domainTransformations: [
+    {
+      match: /^([a-zA-Z0-9][a-zA-Z0-9-_]*)\.storefront\.myapp\.io$/,
+      transform: '$1.myshopify.com',
+    },
+  ],
+});
+```
+</CodeGroup>
+
+## Notes
+
+<Note>
+  The `shopifyApi()` function validates all configuration parameters and throws a `ShopifyError` if required fields are missing or invalid.
+</Note>
+
+<Note>
+  The library automatically logs the version and environment information when initialized.
+</Note>
+
+<Note>
+  For custom store apps (`isCustomStoreApp: true`), the `apiKey` and `scopes` parameters are optional, but you must provide `adminApiAccessToken`.
+</Note>

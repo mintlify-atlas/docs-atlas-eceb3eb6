@@ -1,0 +1,436 @@
+---
+title: "@shopify/shopify-app-express"
+description: "Express adapter for building Shopify apps with the Shopify App JavaScript SDK"
+---
+
+## Installation
+
+```bash
+npm install @shopify/shopify-app-express
+```
+
+## shopifyApp()
+
+Creates middleware and utilities for building Shopify apps with Express.
+
+### Function Signature
+
+```typescript
+function shopifyApp<Params extends AppConfigParams>(
+  config: Params
+): ShopifyApp<Params>
+```
+
+### Configuration
+
+<ParamField path="config" type="AppConfigParams" required>
+  Configuration object for the Express app
+
+  <Expandable title="properties">
+    <ParamField path="api" type="ExpressApiConfigParams" required>
+      Shopify API configuration
+
+      <Expandable title="properties">
+        <ParamField path="apiVersion" type="ApiVersion" required>
+          The version of Shopify's Admin API to use
+        </ParamField>
+
+        <ParamField path="apiKey" type="string">
+          Your app's API key. Defaults to `process.env.SHOPIFY_API_KEY`
+        </ParamField>
+
+        <ParamField path="apiSecretKey" type="string">
+          Your app's API secret key. Defaults to `process.env.SHOPIFY_API_SECRET`
+        </ParamField>
+
+        <ParamField path="scopes" type="string[]">
+          The access scopes your app needs. Defaults to `process.env.SCOPES?.split(',')`
+        </ParamField>
+
+        <ParamField path="hostName" type="string">
+          Your app's host name. Defaults to `process.env.HOST` without protocol
+        </ParamField>
+
+        <ParamField path="hostScheme" type="'http' | 'https'">
+          The protocol for your app. Defaults to extracted from `process.env.HOST`
+        </ParamField>
+
+        <ParamField path="isEmbeddedApp" type="boolean" default="true">
+          Whether your app renders embedded inside the Shopify Admin
+        </ParamField>
+
+        <ParamField path="restResources" type="ShopifyRestResources">
+          REST API resource configurations
+        </ParamField>
+      </Expandable>
+    </ParamField>
+
+    <ParamField path="auth" type="AuthConfigInterface" required>
+      Authentication configuration
+
+      <Expandable title="properties">
+        <ParamField path="path" type="string" required>
+          The URL path for initiating OAuth
+        </ParamField>
+
+        <ParamField path="callbackPath" type="string" required>
+          The URL path for the OAuth callback
+        </ParamField>
+
+        <ParamField path="checkBillingPlans" type="string[]">
+          Array of billing plan names to check during authentication
+        </ParamField>
+      </Expandable>
+    </ParamField>
+
+    <ParamField path="webhooks" type="WebhooksConfigInterface" required>
+      Webhook configuration
+
+      <Expandable title="properties">
+        <ParamField path="path" type="string" required>
+          The URL path for receiving webhooks
+        </ParamField>
+      </Expandable>
+    </ParamField>
+
+    <ParamField path="sessionStorage" type="SessionStorage">
+      Session storage adapter. Defaults to `MemorySessionStorage`
+    </ParamField>
+
+    <ParamField path="useOnlineTokens" type="boolean" default="false">
+      Whether to use online access tokens
+    </ParamField>
+
+    <ParamField path="exitIframePath" type="string" default="/exitiframe">
+      Path for breaking out of iframe
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Return Value
+
+Returns a `ShopifyApp` object with the following properties:
+
+<ResponseField name="config" type="AppConfigInterface">
+  The validated and processed configuration
+</ResponseField>
+
+<ResponseField name="api" type="Shopify">
+  The Shopify API instance for making direct API calls
+</ResponseField>
+
+<ResponseField name="auth" type="AuthMiddleware">
+  Express middleware for handling OAuth authentication
+
+  **Usage:**
+  ```typescript
+  app.get(shopify.config.auth.path, shopify.auth.begin());
+  app.get(shopify.config.auth.callbackPath, shopify.auth.callback());
+  ```
+
+  **Methods:**
+  - `begin()` - Returns middleware to start the OAuth flow
+  - `callback()` - Returns middleware to handle the OAuth callback
+</ResponseField>
+
+<ResponseField name="processWebhooks" type="ProcessWebhooksMiddleware">
+  Express middleware for processing webhook requests
+
+  **Function Signature:**
+  ```typescript
+  (options: ProcessWebhooksOptions) => RequestHandler
+  ```
+
+  **Usage:**
+  ```typescript
+  app.post(
+    shopify.config.webhooks.path,
+    shopify.processWebhooks({ webhookHandlers })
+  );
+  ```
+</ResponseField>
+
+<ResponseField name="validateAuthenticatedSession" type="ValidateAuthenticatedSessionMiddleware">
+  Express middleware that validates the session and redirects to auth if invalid
+
+  **Function Signature:**
+  ```typescript
+  () => RequestHandler
+  ```
+
+  **Usage:**
+  ```typescript
+  app.get('/protected-route', 
+    shopify.validateAuthenticatedSession(),
+    async (req, res) => {
+      const session = res.locals.shopify.session;
+      // Use authenticated session
+    }
+  );
+  ```
+
+  **Response Locals:**
+  - `res.locals.shopify.session: Session` - The validated session
+</ResponseField>
+
+<ResponseField name="cspHeaders" type="CspHeadersMiddleware">
+  Express middleware that adds Content Security Policy headers for embedded apps
+
+  **Function Signature:**
+  ```typescript
+  () => RequestHandler
+  ```
+
+  **Usage:**
+  ```typescript
+  app.use(shopify.cspHeaders());
+  ```
+</ResponseField>
+
+<ResponseField name="ensureInstalledOnShop" type="EnsureInstalledMiddleware">
+  Express middleware that ensures the app is installed on the shop
+
+  **Function Signature:**
+  ```typescript
+  () => RequestHandler
+  ```
+
+  **Usage:**
+  ```typescript
+  app.use('/app/*', shopify.ensureInstalledOnShop());
+  ```
+</ResponseField>
+
+<ResponseField name="redirectToShopifyOrAppRoot" type="RedirectToShopifyOrAppRootMiddleware">
+  Express middleware that redirects to Shopify or app root based on context
+
+  **Function Signature:**
+  ```typescript
+  () => RequestHandler
+  ```
+
+  **Usage:**
+  ```typescript
+  app.get('/', shopify.redirectToShopifyOrAppRoot());
+  ```
+</ResponseField>
+
+<ResponseField name="redirectOutOfApp" type="RedirectOutOfAppFunction">
+  Function to redirect users out of the embedded app context
+
+  **Function Signature:**
+  ```typescript
+  (params: {
+    req: Request;
+    res: Response;
+    redirectUri: string;
+    shop: string;
+  }) => void
+  ```
+
+  **Usage:**
+  ```typescript
+  shopify.redirectOutOfApp({
+    req,
+    res,
+    redirectUri: 'https://example.com/external-page',
+    shop: 'my-shop.myshopify.com'
+  });
+  ```
+</ResponseField>
+
+## Example Usage
+
+<CodeGroup>
+
+```typescript Basic Setup
+import express from 'express';
+import { shopifyApp } from '@shopify/shopify-app-express';
+import { MemorySessionStorage } from '@shopify/shopify-app-session-storage-memory';
+import { ApiVersion } from '@shopify/shopify-api';
+
+const app = express();
+
+const shopify = shopifyApp({
+  api: {
+    apiVersion: ApiVersion.October24,
+    // apiKey, apiSecretKey, scopes, hostName defaults from env vars
+  },
+  auth: {
+    path: '/api/auth',
+    callbackPath: '/api/auth/callback',
+  },
+  webhooks: {
+    path: '/api/webhooks',
+  },
+  sessionStorage: new MemorySessionStorage(),
+});
+
+// Apply CSP headers
+app.use(shopify.cspHeaders());
+
+// OAuth routes
+app.get(shopify.config.auth.path, shopify.auth.begin());
+app.get(shopify.config.auth.callbackPath, shopify.auth.callback());
+
+// Webhook endpoint
+app.post(
+  shopify.config.webhooks.path,
+  express.text({ type: '*/*' }),
+  shopify.processWebhooks({ webhookHandlers })
+);
+
+app.listen(3000);
+```
+
+```typescript Protected Routes
+import express from 'express';
+import { shopifyApp } from '@shopify/shopify-app-express';
+
+const app = express();
+const shopify = shopifyApp({ /* config */ });
+
+// Ensure app is installed
+app.use('/app/*', shopify.ensureInstalledOnShop());
+
+// Protected route requiring authentication
+app.get(
+  '/app/dashboard',
+  shopify.validateAuthenticatedSession(),
+  async (req, res) => {
+    const session = res.locals.shopify.session;
+    
+    const client = new shopify.api.clients.Graphql({ session });
+    const response = await client.query({
+      data: `{
+        shop {
+          name
+          email
+        }
+      }`,
+    });
+    
+    res.json(response.body);
+  }
+);
+```
+
+```typescript Webhook Handlers
+import { shopifyApp } from '@shopify/shopify-app-express';
+import { DeliveryMethod } from '@shopify/shopify-api';
+
+const shopify = shopifyApp({ /* config */ });
+
+const webhookHandlers = {
+  PRODUCTS_CREATE: [
+    {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: '/api/webhooks',
+      callback: async (topic, shop, body, webhookId) => {
+        const payload = JSON.parse(body);
+        console.log(`Product created: ${payload.title}`);
+        // Handle webhook
+      },
+    },
+  ],
+  APP_UNINSTALLED: [
+    {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: '/api/webhooks',
+      callback: async (topic, shop, body) => {
+        console.log(`App uninstalled from ${shop}`);
+        // Clean up shop data
+      },
+    },
+  ],
+};
+
+app.post(
+  shopify.config.webhooks.path,
+  express.text({ type: '*/*' }),
+  shopify.processWebhooks({ webhookHandlers })
+);
+```
+
+```typescript Making API Calls
+import { shopifyApp } from '@shopify/shopify-app-express';
+
+const shopify = shopifyApp({ /* config */ });
+
+app.get(
+  '/app/products',
+  shopify.validateAuthenticatedSession(),
+  async (req, res) => {
+    const session = res.locals.shopify.session;
+    
+    // GraphQL query
+    const graphqlClient = new shopify.api.clients.Graphql({ session });
+    const products = await graphqlClient.query({
+      data: `{
+        products(first: 10) {
+          edges {
+            node {
+              id
+              title
+            }
+          }
+        }
+      }`,
+    });
+    
+    // REST API call
+    const restClient = new shopify.api.clients.Rest({ session });
+    const orders = await restClient.get({
+      path: 'orders',
+      query: { limit: '10' },
+    });
+    
+    res.json({
+      products: products.body,
+      orders: orders.body,
+    });
+  }
+);
+```
+
+</CodeGroup>
+
+## Exported Types
+
+```typescript
+export {
+  ApiVersion,
+} from '@shopify/shopify-app-express';
+
+export type {
+  AppConfigParams,
+  ExpressApiConfigParams,
+  AuthConfigInterface,
+  WebhooksConfigInterface,
+  ShopifyApp,
+  AuthMiddleware,
+  ProcessWebhooksMiddleware,
+  ValidateAuthenticatedSessionMiddleware,
+  CspHeadersMiddleware,
+  EnsureInstalledMiddleware,
+  RedirectToShopifyOrAppRootMiddleware,
+  RedirectOutOfAppFunction,
+} from '@shopify/shopify-app-express';
+```
+
+## Response Locals
+
+When using authentication middleware, the following data is attached to `res.locals.shopify`:
+
+```typescript
+res.locals.shopify = {
+  session: Session; // The validated Shopify session
+};
+```
+
+## See Also
+
+- [Session Storage Options](https://github.com/Shopify/shopify-app-js/blob/main/README.md#session-storage-options)
+- [Shopify API Versions](https://shopify.dev/docs/api/)
+- [Express.js Documentation](https://expressjs.com/)
+- [Webhooks Guide](https://shopify.dev/docs/apps/build/webhooks)

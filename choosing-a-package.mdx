@@ -1,0 +1,529 @@
+---
+title: Choosing a Package
+description: Find the right Shopify JavaScript SDK package for your use case, whether you need API clients, app infrastructure, or session storage.
+---
+
+# Choosing a Package
+
+The Shopify App JavaScript SDK is organized as a monorepo with multiple packages. This guide will help you choose the right packages for your needs.
+
+## Quick Decision Tree
+
+<Steps>
+  <Step title="Do you already have access tokens?">
+    **Yes** → Use the [API Client packages](#api-clients)
+    
+    **No** → You need the [App Building packages](#app-building) to handle OAuth
+  </Step>
+  <Step title="Which API do you need?">
+    - **Admin API** → `@shopify/admin-api-client`
+    - **Storefront API** → `@shopify/storefront-api-client`
+    - **Both or custom** → `@shopify/graphql-client`
+  </Step>
+  <Step title="Building a full app?">
+    - **Framework-agnostic** → `@shopify/shopify-api`
+    - **Using Express** → `@shopify/shopify-app-express`
+    - **Using Remix** → `@shopify/shopify-app-remix`
+  </Step>
+</Steps>
+
+## API Clients
+
+These packages are lightweight clients for interacting with Shopify's APIs. Use these when you:
+
+- Already have access tokens (from a custom app or OAuth flow)
+- Want minimal dependencies and framework-agnostic code
+- Need to make API requests without full app infrastructure
+
+### @shopify/admin-api-client
+
+**Best for**: Interacting with the Admin API (both GraphQL and REST)
+
+<CodeGroup>
+
+```bash npm
+npm install @shopify/admin-api-client
+```
+
+```bash yarn
+yarn add @shopify/admin-api-client
+```
+
+```bash pnpm
+pnpm add @shopify/admin-api-client
+```
+
+</CodeGroup>
+
+**Features**:
+- GraphQL and REST API support
+- Automatic retry handling for 429 and 503 responses
+- Built-in type definitions
+- Configurable logging for debugging
+
+**Use cases**:
+- Querying products, orders, customers
+- Managing inventory and fulfillments
+- Creating and updating store resources
+- Admin app backends
+
+**Example**:
+
+```typescript
+import {createAdminApiClient} from '@shopify/admin-api-client';
+
+const client = createAdminApiClient({
+  storeDomain: 'your-shop-name.myshopify.com',
+  apiVersion: '2024-01',
+  accessToken: 'your-admin-api-access-token',
+});
+
+const {data} = await client.request(`
+  query {
+    shop {
+      name
+      email
+    }
+  }
+`);
+```
+
+[View full documentation →](/api-clients/admin-api-client)
+
+### @shopify/storefront-api-client
+
+**Best for**: Building customer-facing features with the Storefront API
+
+<CodeGroup>
+
+```bash npm
+npm install @shopify/storefront-api-client
+```
+
+```bash yarn
+yarn add @shopify/storefront-api-client
+```
+
+```bash pnpm
+pnpm add @shopify/storefront-api-client
+```
+
+</CodeGroup>
+
+**Features**:
+- GraphQL Storefront API support
+- Support for `@defer` directive and streaming responses
+- Public and private access token support
+- CDN delivery for browser usage
+
+**Use cases**:
+- Custom storefronts and headless commerce
+- Product catalogs and collections
+- Shopping cart management
+- Customer account integration
+
+**Example**:
+
+```typescript
+import {createStorefrontApiClient} from '@shopify/storefront-api-client';
+
+const client = createStorefrontApiClient({
+  storeDomain: 'your-shop-name.myshopify.com',
+  apiVersion: '2024-01',
+  publicAccessToken: 'your-storefront-public-access-token',
+});
+
+const {data} = await client.request(`
+  query ProductQuery($handle: String!) {
+    product(handle: $handle) {
+      id
+      title
+      priceRange {
+        minVariantPrice {
+          amount
+          currencyCode
+        }
+      }
+    }
+  }`,
+  {
+    variables: {handle: 'sample-product'},
+  }
+);
+```
+
+[View full documentation →](/api-clients/storefront-api-client)
+
+### @shopify/graphql-client
+
+**Best for**: Generic GraphQL client for any Shopify API or custom needs
+
+<CodeGroup>
+
+```bash npm
+npm install @shopify/graphql-client
+```
+
+```bash yarn
+yarn add @shopify/graphql-client
+```
+
+```bash pnpm
+pnpm add @shopify/graphql-client
+```
+
+</CodeGroup>
+
+**Features**:
+- Works with any GraphQL API
+- Full control over URL and headers
+- Stream response support
+- Runtime-agnostic (Node.js, browser, edge)
+
+**Use cases**:
+- Multiple API access in one app
+- Custom authentication requirements
+- Non-standard Shopify APIs
+- Testing and development
+
+**Example**:
+
+```typescript
+import {createGraphQLClient} from '@shopify/graphql-client';
+
+const client = createGraphQLClient({
+  url: 'https://your-shop-name.myshopify.com/api/2024-01/graphql.json',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Shopify-Storefront-Access-Token': 'your-token',
+  },
+  retries: 1,
+});
+```
+
+[View full documentation →](/api-clients/graphql-client)
+
+### @shopify/api-codegen-preset
+
+**Best for**: Adding TypeScript type safety to your GraphQL queries
+
+<CodeGroup>
+
+```bash npm
+npm install --save-dev @shopify/api-codegen-preset
+```
+
+```bash yarn
+yarn add --dev @shopify/api-codegen-preset
+```
+
+```bash pnpm
+pnpm add -D @shopify/api-codegen-preset
+```
+
+</CodeGroup>
+
+**Features**:
+- Automatic type generation from GraphQL operations
+- Integrates with `graphql-codegen`
+- Support for all Shopify APIs
+- Watch mode for development
+
+**Use cases**:
+- TypeScript projects requiring type safety
+- Large codebases with many queries
+- Teams wanting autocomplete and validation
+- Preventing runtime type errors
+
+**Example**:
+
+```typescript
+// .graphqlrc.ts
+import {ApiType, shopifyApiProject} from '@shopify/api-codegen-preset';
+
+export default {
+  schema: 'https://shopify.dev/admin-graphql-direct-proxy',
+  documents: ['*.ts', '!node_modules'],
+  projects: {
+    default: shopifyApiProject({
+      apiType: ApiType.Admin,
+      apiVersion: '2024-01',
+      outputDir: './types',
+    }),
+  },
+};
+```
+
+[View full documentation →](/api-clients/api-codegen-preset)
+
+## App Building
+
+These packages help you build complete Shopify apps with OAuth, webhooks, session management, and more.
+
+### @shopify/shopify-api
+
+**Best for**: Framework-agnostic Shopify app infrastructure
+
+<CodeGroup>
+
+```bash npm
+npm install @shopify/shopify-api
+```
+
+```bash yarn
+yarn add @shopify/shopify-api
+```
+
+```bash pnpm
+pnpm add @shopify/shopify-api
+```
+
+</CodeGroup>
+
+**Features**:
+- OAuth authentication flow
+- Webhook registration and processing
+- Session management
+- REST resources and GraphQL clients
+- Billing API integration
+- Runtime adapters (Node.js, Cloudflare Workers, Web API)
+
+**Use cases**:
+- Building apps with any framework
+- Custom server implementations
+- Serverless and edge deployments
+- Apps requiring full control over architecture
+
+**Requires**:
+- Manual route setup
+- Session storage implementation
+- Webhook handler configuration
+
+**Example**:
+
+```typescript
+import '@shopify/shopify-api/adapters/node';
+import {shopifyApi, ApiVersion} from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  apiKey: 'your-api-key',
+  apiSecretKey: 'your-api-secret',
+  scopes: ['read_products', 'write_orders'],
+  hostName: 'your-app-domain.com',
+  apiVersion: ApiVersion.January24,
+});
+```
+
+[View full documentation →](/app-libraries/shopify-api)
+
+### @shopify/shopify-app-express
+
+**Best for**: Express.js apps with middleware and route handlers
+
+<CodeGroup>
+
+```bash npm
+npm install @shopify/shopify-app-express
+```
+
+```bash yarn
+yarn add @shopify/shopify-app-express
+```
+
+```bash pnpm
+pnpm add @shopify/shopify-app-express
+```
+
+</CodeGroup>
+
+**Features**:
+- Express middleware for authentication
+- Pre-built OAuth routes
+- Webhook processing middleware
+- Session token validation
+- Built on top of `@shopify/shopify-api`
+
+**Use cases**:
+- Express.js applications
+- Traditional server-rendered apps
+- Apps with existing Express infrastructure
+- Quick prototypes and MVPs
+
+**Example**:
+
+```typescript
+import express from 'express';
+import {shopifyApp} from '@shopify/shopify-app-express';
+
+const shopify = shopifyApp({
+  api: {
+    apiKey: 'your-api-key',
+    apiSecretKey: 'your-api-secret',
+    scopes: ['read_products'],
+    hostName: 'your-app-domain.com',
+  },
+  auth: {
+    path: '/api/auth',
+    callbackPath: '/api/auth/callback',
+  },
+});
+
+const app = express();
+
+app.get(shopify.config.auth.path, shopify.auth.begin());
+app.get(
+  shopify.config.auth.callbackPath,
+  shopify.auth.callback(),
+  shopify.redirectToShopifyOrAppRoot(),
+);
+```
+
+[View full documentation →](/app-libraries/shopify-app-express)
+
+### @shopify/shopify-app-remix
+
+**Best for**: Remix framework applications
+
+<CodeGroup>
+
+```bash npm
+npm install @shopify/shopify-app-remix
+```
+
+```bash yarn
+yarn add @shopify/shopify-app-remix
+```
+
+```bash pnpm
+pnpm add @shopify/shopify-app-remix
+```
+
+</CodeGroup>
+
+**Features**:
+- Remix loader and action utilities
+- Automatic OAuth handling
+- Session management with Remix sessions
+- TypeScript-first development
+- Built on top of `@shopify/shopify-api`
+
+**Use cases**:
+- Modern Remix applications
+- Full-stack TypeScript apps
+- Apps using Shopify's official templates
+- Progressive enhancement patterns
+
+[View full documentation →](/app-libraries/shopify-app-remix)
+
+## Session Storage
+
+When building a full Shopify app, you need to store sessions. Choose a storage adapter based on your database:
+
+### Database Adapters
+
+<CardGroup cols={2}>
+  <Card title="PostgreSQL" icon="database">
+    `@shopify/shopify-app-session-storage-postgresql`
+  </Card>
+  <Card title="MySQL" icon="database">
+    `@shopify/shopify-app-session-storage-mysql`
+  </Card>
+  <Card title="MongoDB" icon="database">
+    `@shopify/shopify-app-session-storage-mongodb`
+  </Card>
+  <Card title="Redis" icon="database">
+    `@shopify/shopify-app-session-storage-redis`
+  </Card>
+  <Card title="SQLite" icon="database">
+    `@shopify/shopify-app-session-storage-sqlite`
+  </Card>
+  <Card title="DynamoDB" icon="database">
+    `@shopify/shopify-app-session-storage-dynamodb`
+  </Card>
+  <Card title="Cloudflare KV" icon="cloud">
+    `@shopify/shopify-app-session-storage-kv`
+  </Card>
+  <Card title="Memory (Dev Only)" icon="memory">
+    `@shopify/shopify-app-session-storage-memory`
+  </Card>
+</CardGroup>
+
+### ORM Adapters
+
+<CardGroup cols={2}>
+  <Card title="Prisma" icon="code">
+    `@shopify/shopify-app-session-storage-prisma`
+  </Card>
+  <Card title="Drizzle" icon="code">
+    `@shopify/shopify-app-session-storage-drizzle`
+  </Card>
+</CardGroup>
+
+**Example**:
+
+```typescript
+import {PostgreSQLSessionStorage} from '@shopify/shopify-app-session-storage-postgresql';
+
+const sessionStorage = new PostgreSQLSessionStorage(
+  'postgresql://username:password@localhost/database'
+);
+
+const shopify = shopifyApi({
+  // ... other config
+  sessionStorage,
+});
+```
+
+## Common Combinations
+
+### Simple API Integration
+
+```bash
+npm install @shopify/admin-api-client
+```
+
+Perfect for scripts, background jobs, or simple integrations where you already have an access token.
+
+### Type-Safe API Client
+
+```bash
+npm install @shopify/admin-api-client
+npm install --save-dev @shopify/api-codegen-preset
+```
+
+Add type safety to your API client with automatic code generation.
+
+### Full Express App
+
+```bash
+npm install @shopify/shopify-app-express
+npm install @shopify/shopify-app-session-storage-postgresql
+```
+
+Complete app infrastructure with Express and PostgreSQL session storage.
+
+### Headless Storefront
+
+```bash
+npm install @shopify/storefront-api-client
+npm install --save-dev @shopify/api-codegen-preset
+```
+
+Build custom storefronts with type-safe Storefront API access.
+
+## Still Not Sure?
+
+<CardGroup cols={2}>
+  <Card title="Try the Quickstart" icon="rocket" href="/quickstart">
+    Start with the Admin API Client and expand from there
+  </Card>
+  <Card title="View Examples" icon="code" href="/examples">
+    See real-world code examples for different use cases
+  </Card>
+  <Card title="Ask the Community" icon="users" href="https://github.com/Shopify/shopify-app-js/discussions">
+    Get help from other developers
+  </Card>
+  <Card title="Read the Guides" icon="book" href="/apps/shopify-api">
+    Deep dive into OAuth, webhooks, and more
+  </Card>
+</CardGroup>

@@ -1,0 +1,478 @@
+---
+title: 'Webhooks API'
+description: 'Register, process, and validate webhook handlers for Shopify events'
+---
+
+## Overview
+
+The webhooks API provides functions for managing shop-specific webhook subscriptions and validating webhook requests. For most apps, **app-specific webhooks** are recommended.
+
+Access the webhooks API through your configured Shopify instance:
+
+```typescript
+const shopify = shopifyApi({ /* config */ });
+const webhooks = shopify.webhooks;
+```
+
+## validate()
+
+Validates an incoming HTTP webhook request from Shopify. This is the primary function you'll use for both app-specific and shop-specific webhooks.
+
+### Signature
+
+```typescript
+type Validate = (params: WebhookValidateParams) => Promise<WebhookValidation>;
+```
+
+### Parameters
+
+<ParamField path="rawBody" type="string" required>
+  The raw request body as a string.
+</ParamField>
+
+<ParamField path="rawRequest" type="any" required>
+  The raw HTTP request object from your framework.
+</ParamField>
+
+<ParamField path="rawResponse" type="any" required>
+  The raw HTTP response object from your framework.
+</ParamField>
+
+### Returns
+
+Returns a `Promise<WebhookValidation>` with the following possible structures:
+
+#### Valid Webhook
+
+<ResponseField name="valid" type="true">
+  Indicates the webhook is valid.
+</ResponseField>
+
+<ResponseField name="domain" type="string">
+  The shop domain.
+</ResponseField>
+
+<ResponseField name="topic" type="string">
+  The webhook topic (e.g., `PRODUCTS_CREATE`).
+</ResponseField>
+
+<ResponseField name="hmac" type="string">
+  The HMAC signature from the request.
+</ResponseField>
+
+<ResponseField name="apiVersion" type="string">
+  The API version of the webhook.
+</ResponseField>
+
+<ResponseField name="webhookId" type="string">
+  The webhook ID (for webhooks).
+</ResponseField>
+
+<ResponseField name="eventId" type="string">
+  The event ID.
+</ResponseField>
+
+<ResponseField name="subTopic" type="string">
+  The webhook sub-topic (if applicable).
+</ResponseField>
+
+#### Invalid Webhook
+
+<ResponseField name="valid" type="false">
+  Indicates the webhook is invalid.
+</ResponseField>
+
+<ResponseField name="reason" type="WebhookValidationErrorReasonType">
+  The reason for validation failure:
+  - `missing_headers` - Required headers are missing
+  - `invalid_hmac` - HMAC validation failed
+  - `invalid_body` - Body is invalid
+</ResponseField>
+
+<ResponseField name="missingHeaders" type="string[]">
+  Array of missing header names (when reason is `missing_headers`).
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+```typescript Express
+app.post('/webhooks/products/create', async (req, res) => {
+  // Express with express.text() middleware
+  const validation = await shopify.webhooks.validate({
+    rawBody: req.body, // Already a string from express.text()
+    rawRequest: req,
+    rawResponse: res,
+  });
+  
+  if (!validation.valid) {
+    console.error('Webhook validation failed:', validation.reason);
+    return res.status(401).send('Unauthorized');
+  }
+  
+  // Process the webhook
+  console.log('Received webhook:', validation.topic);
+  console.log('From shop:', validation.domain);
+  
+  // Parse the body
+  const webhookData = JSON.parse(req.body);
+  console.log('Product created:', webhookData.id);
+  
+  res.status(200).send('OK');
+});
+```
+
+```typescript Next.js API Route
+export const config = {
+  api: {
+    bodyParser: false, // Disable body parsing
+  },
+};
+
+export default async function handler(req, res) {
+  // Read raw body
+  const rawBody = await buffer(req);
+  
+  const validation = await shopify.webhooks.validate({
+    rawBody: rawBody.toString('utf-8'),
+    rawRequest: req,
+    rawResponse: res,
+  });
+  
+  if (!validation.valid) {
+    return res.status(401).json({ error: validation.reason });
+  }
+  
+  const data = JSON.parse(rawBody.toString());
+  // Handle webhook...
+  
+  res.status(200).json({ received: true });
+}
+```
+
+```typescript Error Handling
+const validation = await shopify.webhooks.validate({
+  rawBody,
+  rawRequest: req,
+  rawResponse: res,
+});
+
+if (!validation.valid) {
+  switch (validation.reason) {
+    case 'missing_headers':
+      console.error('Missing headers:', validation.missingHeaders);
+      break;
+    case 'invalid_hmac':
+      console.error('HMAC validation failed');
+      break;
+    case 'invalid_body':
+      console.error('Invalid body');
+      break;
+  }
+  return res.status(401).send('Unauthorized');
+}
+```
+</CodeGroup>
+
+## addHandlers()
+
+Adds shop-specific webhook handlers to the library registry. **Only needed for shop-specific webhooks.** Use app-specific webhooks instead in most cases.
+
+### Signature
+
+```typescript
+type AddHandlers = (handlers: AddHandlersParams) => void;
+```
+
+### Parameters
+
+<ParamField path="handlers" type="Record<string, WebhookHandler | WebhookHandler[]>" required>
+  An object mapping webhook topics to their handlers.
+</ParamField>
+
+### Handler Types
+
+#### HTTP Handler
+
+```typescript
+interface HttpWebhookHandler {
+  deliveryMethod: DeliveryMethod.Http;
+  callbackUrl: string;
+  callback?: WebhookHandlerFunction;
+  includeFields?: string[];
+  metafieldNamespaces?: string[];
+  subTopic?: string;
+}
+```
+
+#### EventBridge Handler
+
+```typescript
+interface EventBridgeWebhookHandler {
+  deliveryMethod: DeliveryMethod.EventBridge;
+  arn: string;
+  includeFields?: string[];
+  metafieldNamespaces?: string[];
+}
+```
+
+#### PubSub Handler
+
+```typescript
+interface PubSubWebhookHandler {
+  deliveryMethod: DeliveryMethod.PubSub;
+  pubSubProject: string;
+  pubSubTopic: string;
+  includeFields?: string[];
+  metafieldNamespaces?: string[];
+}
+```
+
+### Example
+
+```typescript
+import { DeliveryMethod } from '@shopify/shopify-api';
+
+shopify.webhooks.addHandlers({
+  PRODUCTS_CREATE: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: '/webhooks/products/create',
+    callback: async (topic, shop, body, webhookId) => {
+      const data = JSON.parse(body);
+      console.log(`Product created in ${shop}:`, data.id);
+    },
+  },
+  ORDERS_PAID: [
+    {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: '/webhooks/orders/paid',
+      callback: async (topic, shop, body) => {
+        const order = JSON.parse(body);
+        await fulfillOrder(order);
+      },
+    },
+    {
+      deliveryMethod: DeliveryMethod.EventBridge,
+      arn: 'arn:aws:events:us-east-1:123456789012:event-bus/shopify-webhooks',
+    },
+  ],
+});
+```
+
+## register()
+
+Registers shop-specific webhooks with Shopify. **Only needed for shop-specific webhooks.**
+
+### Signature
+
+```typescript
+type Register = (params: RegisterParams) => Promise<RegisterReturn>;
+```
+
+### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session for the shop to register webhooks.
+</ParamField>
+
+### Returns
+
+Returns a `Promise<RegisterReturn>` - an object mapping topics to their registration results.
+
+<ResponseField name="[topic]" type="RegisterResult[]">
+  Array of registration results for each topic.
+  
+  <Expandable title="RegisterResult">
+    <ResponseField name="success" type="boolean">
+      Whether the registration was successful.
+    </ResponseField>
+    
+    <ResponseField name="deliveryMethod" type="DeliveryMethod">
+      The delivery method used.
+    </ResponseField>
+    
+    <ResponseField name="result" type="unknown">
+      The raw result from Shopify.
+    </ResponseField>
+    
+    <ResponseField name="operation" type="WebhookOperation">
+      The operation performed: `create`, `update`, or `delete`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example
+
+```typescript
+// First add handlers
+shopify.webhooks.addHandlers({
+  PRODUCTS_CREATE: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: '/webhooks/products/create',
+  },
+});
+
+// Then register them
+const result = await shopify.webhooks.register({ session });
+
+console.log('Registration results:', result);
+// {
+//   PRODUCTS_CREATE: [
+//     {
+//       success: true,
+//       deliveryMethod: 'http',
+//       result: { ... },
+//       operation: 'create'
+//     }
+//   ]
+// }
+```
+
+## process()
+
+Processes an incoming shop-specific webhook request and calls the registered callback. **Only needed for shop-specific webhooks.**
+
+### Signature
+
+```typescript
+type Process = (params: WebhookProcessParams) => Promise<void>;
+```
+
+### Parameters
+
+<ParamField path="rawBody" type="string" required>
+  The raw request body.
+</ParamField>
+
+<ParamField path="rawRequest" type="any" required>
+  The raw HTTP request.
+</ParamField>
+
+<ParamField path="rawResponse" type="any" required>
+  The raw HTTP response.
+</ParamField>
+
+### Example
+
+```typescript
+app.post('/webhooks/products/create', async (req, res) => {
+  await shopify.webhooks.process({
+    rawBody: req.body,
+    rawRequest: req,
+    rawResponse: res,
+  });
+  
+  res.status(200).send('OK');
+});
+```
+
+## getTopicsAdded()
+
+Returns all topics that have been added to the registry.
+
+### Signature
+
+```typescript
+type GetTopicsAdded = () => string[];
+```
+
+### Example
+
+```typescript
+const topics = shopify.webhooks.getTopicsAdded();
+console.log('Registered topics:', topics);
+// ['PRODUCTS_CREATE', 'ORDERS_PAID']
+```
+
+## getHandlers()
+
+Returns the handlers for a specific topic.
+
+### Signature
+
+```typescript
+type GetHandlers = (topic: string) => WebhookHandler[] | undefined;
+```
+
+### Example
+
+```typescript
+const handlers = shopify.webhooks.getHandlers('PRODUCTS_CREATE');
+console.log('Handlers for PRODUCTS_CREATE:', handlers);
+```
+
+## Types
+
+### DeliveryMethod
+
+```typescript
+enum DeliveryMethod {
+  Http = 'http',
+  EventBridge = 'eventbridge',
+  PubSub = 'pubsub',
+}
+```
+
+### WebhookOperation
+
+```typescript
+enum WebhookOperation {
+  Create = 'create',
+  Update = 'update',
+  Delete = 'delete',
+}
+```
+
+### WebhookHandlerFunction
+
+```typescript
+type WebhookHandlerFunction = (
+  topic: string,
+  shop_domain: string,
+  body: string,
+  webhookId: string,
+  apiVersion?: string,
+  subTopic?: string,
+  context?: any,
+) => Promise<void>;
+```
+
+## Common Webhook Topics
+
+Some commonly used webhook topics:
+
+- `PRODUCTS_CREATE` - Product created
+- `PRODUCTS_UPDATE` - Product updated
+- `PRODUCTS_DELETE` - Product deleted
+- `ORDERS_CREATE` - Order created
+- `ORDERS_UPDATED` - Order updated
+- `ORDERS_PAID` - Order paid
+- `ORDERS_FULFILLED` - Order fulfilled
+- `CUSTOMERS_CREATE` - Customer created
+- `CUSTOMERS_UPDATE` - Customer updated
+- `CUSTOMERS_DELETE` - Customer deleted
+- `CUSTOMERS_DATA_REQUEST` - GDPR data request
+- `CUSTOMERS_REDACT` - GDPR redaction request
+- `SHOP_REDACT` - GDPR shop data deletion
+
+[See all available topics](https://shopify.dev/docs/api/admin-graphql/latest/enums/webhooksubscriptiontopic)
+
+## Notes
+
+<Note>
+  **Use app-specific webhooks** for most use cases. They're easier to set up and don't require shop-specific registration.
+  
+  [Learn about app-specific vs shop-specific webhooks](https://shopify.dev/docs/apps/build/webhooks/subscribe#app-specific-vs-shop-specific-subscriptions)
+</Note>
+
+<Note>
+  The `validate()` function works for both app-specific and shop-specific webhooks.
+</Note>
+
+<Note>
+  Always validate webhooks before processing them to ensure they came from Shopify.
+</Note>
+
+<Note>
+  You must use `express.text()` or equivalent middleware to get the raw body for webhook validation.
+</Note>

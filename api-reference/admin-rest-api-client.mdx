@@ -1,0 +1,490 @@
+---
+title: 'Admin REST API Client'
+description: 'REST client for Shopify Admin API'
+---
+
+The Admin REST API client provides methods for making REST requests to the Shopify Admin API.
+
+## createAdminRestApiClient()
+
+Creates a REST client for the Shopify Admin API with methods for GET, POST, PUT, and DELETE requests.
+
+```typescript
+import { createAdminRestApiClient } from '@shopify/shopify-app-js';
+
+const client = createAdminRestApiClient({
+  storeDomain: 'my-store.myshopify.com',
+  apiVersion: '2025-10',
+  accessToken: 'shpat_xxxxx',
+});
+```
+
+### Parameters
+
+<ParamField path="storeDomain" type="string" required>
+  The Shopify store domain (e.g., `my-store.myshopify.com`)
+</ParamField>
+
+<ParamField path="apiVersion" type="string" required>
+  The Admin API version to use (e.g., `2025-10`)
+</ParamField>
+
+<ParamField path="accessToken" type="string" required>
+  Admin API access token for authentication
+</ParamField>
+
+<ParamField path="userAgentPrefix" type="string">
+  Optional prefix to add to the User-Agent header
+</ParamField>
+
+<ParamField path="retries" type="number" default="0">
+  Number of retry attempts for failed requests
+</ParamField>
+
+<ParamField path="customFetchApi" type="CustomFetchApi" default="fetch">
+  Custom fetch implementation (defaults to global `fetch`)
+</ParamField>
+
+<ParamField path="logger" type="Logger">
+  Logger function for debugging and monitoring requests
+</ParamField>
+
+<ParamField path="scheme" type="'https' | 'http'" default="'https'">
+  URL scheme to use for requests
+</ParamField>
+
+<ParamField path="defaultRetryTime" type="number">
+  Default wait time in milliseconds between retry attempts
+</ParamField>
+
+<ParamField path="formatPaths" type="boolean" default="true">
+  Automatically format paths to include `/admin/api/{version}/` and `.json` extension
+</ParamField>
+
+<ParamField path="isTesting" type="boolean">
+  Set to `true` to skip server-side usage validation during testing
+</ParamField>
+
+### Returns
+
+<ResponseField name="AdminRestApiClient" type="object">
+  REST API client instance with HTTP methods:
+
+  <Expandable title="methods">
+    <ResponseField name="get" type="function">
+      Execute GET request
+      
+      ```typescript
+      client.get(path: string, options?: GetRequestOptions)
+      ```
+    </ResponseField>
+
+    <ResponseField name="post" type="function">
+      Execute POST request
+      
+      ```typescript
+      client.post(path: string, options: PostRequestOptions)
+      ```
+    </ResponseField>
+
+    <ResponseField name="put" type="function">
+      Execute PUT request
+      
+      ```typescript
+      client.put(path: string, options: PutRequestOptions)
+      ```
+    </ResponseField>
+
+    <ResponseField name="delete" type="function">
+      Execute DELETE request
+      
+      ```typescript
+      client.delete(path: string, options?: DeleteRequestOptions)
+      ```
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Client Methods
+
+### get()
+
+Execute a GET request to the Admin REST API.
+
+```typescript
+const response = await client.get('/products', {
+  searchParams: {
+    limit: 10,
+    status: 'active',
+  },
+});
+
+const products = await response.json();
+```
+
+<ParamField path="path" type="string" required>
+  API endpoint path (e.g., `/products` or `/products/123`)
+  
+  When `formatPaths` is `true` (default), the path is automatically formatted:
+  - `/products` → `/admin/api/2025-10/products.json`
+  - Leading slashes are removed
+  - `.json` extension is added if not present
+</ParamField>
+
+<ParamField path="options" type="GetRequestOptions">
+  Request options:
+  
+  <Expandable title="properties">
+    <ParamField path="searchParams" type="SearchParams">
+      URL query parameters as key-value pairs. Supports nested objects and arrays:
+      
+      ```typescript
+      searchParams: {
+        limit: 10,
+        fields: ['id', 'title'],
+        created_at: {
+          min: '2024-01-01',
+        },
+      }
+      ```
+    </ParamField>
+
+    <ParamField path="headers" type="HeaderOptions">
+      Additional headers to include in the request
+    </ParamField>
+
+    <ParamField path="retries" type="number">
+      Override the client's default retry count for this request
+    </ParamField>
+
+    <ParamField path="apiVersion" type="string">
+      Override the client's default API version for this request
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### post()
+
+Execute a POST request to the Admin REST API.
+
+```typescript
+const response = await client.post('/products', {
+  data: {
+    product: {
+      title: 'New Product',
+      body_html: '<p>Product description</p>',
+      vendor: 'My Vendor',
+    },
+  },
+});
+
+const newProduct = await response.json();
+```
+
+<ParamField path="path" type="string" required>
+  API endpoint path
+</ParamField>
+
+<ParamField path="options" type="PostRequestOptions" required>
+  Request options:
+  
+  <Expandable title="properties">
+    <ParamField path="data" type="Record<string, any> | string" required>
+      Request body data. Objects are automatically serialized to JSON.
+    </ParamField>
+
+    <ParamField path="searchParams" type="SearchParams">
+      URL query parameters
+    </ParamField>
+
+    <ParamField path="headers" type="HeaderOptions">
+      Additional headers to include in the request
+    </ParamField>
+
+    <ParamField path="retries" type="number">
+      Override the client's default retry count for this request
+    </ParamField>
+
+    <ParamField path="apiVersion" type="string">
+      Override the client's default API version for this request
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### put()
+
+Execute a PUT request to the Admin REST API.
+
+```typescript
+const response = await client.put('/products/123', {
+  data: {
+    product: {
+      title: 'Updated Product Title',
+    },
+  },
+});
+
+const updatedProduct = await response.json();
+```
+
+<ParamField path="path" type="string" required>
+  API endpoint path
+</ParamField>
+
+<ParamField path="options" type="PutRequestOptions" required>
+  Request options (same as POST options)
+</ParamField>
+
+### delete()
+
+Execute a DELETE request to the Admin REST API.
+
+```typescript
+const response = await client.delete('/products/123');
+
+if (response.ok) {
+  console.log('Product deleted successfully');
+}
+```
+
+<ParamField path="path" type="string" required>
+  API endpoint path
+</ParamField>
+
+<ParamField path="options" type="DeleteRequestOptions">
+  Request options (same as GET options)
+</ParamField>
+
+## Response Handling
+
+All methods return a standard `Response` object from the Fetch API. You can parse the response using:
+
+```typescript
+// Parse JSON response
+const data = await response.json();
+
+// Get response text
+const text = await response.text();
+
+// Check status
+if (response.ok) {
+  // Status is 2xx
+}
+
+// Get headers
+const rateLimit = response.headers.get('X-Shopify-Shop-Api-Call-Limit');
+```
+
+## Example Usage
+
+<CodeGroup>
+
+```typescript Get Products
+import { createAdminRestApiClient } from '@shopify/shopify-app-js';
+
+const client = createAdminRestApiClient({
+  storeDomain: 'my-store.myshopify.com',
+  apiVersion: '2025-10',
+  accessToken: process.env.SHOPIFY_ADMIN_TOKEN,
+});
+
+// Get all products
+const response = await client.get('/products', {
+  searchParams: {
+    limit: 50,
+    status: 'active',
+  },
+});
+
+const { products } = await response.json();
+console.log(`Found ${products.length} products`);
+```
+
+```typescript Create Product
+// Create a new product
+const response = await client.post('/products', {
+  data: {
+    product: {
+      title: 'Premium Widget',
+      body_html: '<strong>Premium quality widget</strong>',
+      vendor: 'ACME Corp',
+      product_type: 'Widgets',
+      variants: [
+        {
+          price: '29.99',
+          sku: 'WIDGET-001',
+        },
+      ],
+    },
+  },
+});
+
+if (response.ok) {
+  const { product } = await response.json();
+  console.log('Created product:', product.id);
+} else {
+  console.error('Failed to create product:', response.statusText);
+}
+```
+
+```typescript Update Product
+// Update an existing product
+const productId = '7982376198326';
+
+const response = await client.put(`/products/${productId}`, {
+  data: {
+    product: {
+      title: 'Updated Premium Widget',
+      tags: 'premium, featured',
+    },
+  },
+});
+
+const { product } = await response.json();
+```
+
+```typescript Delete Product
+// Delete a product
+const productId = '7982376198326';
+
+const response = await client.delete(`/products/${productId}`);
+
+if (response.ok) {
+  console.log('Product deleted');
+}
+```
+
+```typescript Search Params
+// Complex search parameters
+const response = await client.get('/products', {
+  searchParams: {
+    limit: 25,
+    fields: ['id', 'title', 'vendor'],
+    created_at_min: '2024-01-01T00:00:00Z',
+    status: 'active',
+  },
+});
+
+const { products } = await response.json();
+```
+
+```typescript Custom Headers
+// Add custom headers
+const response = await client.get('/products', {
+  headers: {
+    'X-Custom-Header': 'value',
+  },
+});
+```
+
+```typescript Error Handling
+try {
+  const response = await client.get('/products/999999999');
+  
+  if (!response.ok) {
+    console.error('HTTP error:', response.status, response.statusText);
+    
+    // Parse error response
+    const error = await response.json();
+    console.error('Error details:', error);
+  } else {
+    const { product } = await response.json();
+    console.log('Product:', product);
+  }
+} catch (error) {
+  console.error('Network error:', error);
+}
+```
+
+```typescript Rate Limit Handling
+const response = await client.get('/products');
+
+// Check rate limit headers
+const apiCallLimit = response.headers.get('X-Shopify-Shop-Api-Call-Limit');
+if (apiCallLimit) {
+  const [used, total] = apiCallLimit.split('/').map(Number);
+  console.log(`API calls used: ${used}/${total}`);
+  
+  if (used >= total * 0.9) {
+    console.warn('Approaching rate limit!');
+  }
+}
+```
+
+</CodeGroup>
+
+## Path Formatting
+
+By default, the client automatically formats paths:
+
+```typescript
+// With formatPaths: true (default)
+client.get('/products');
+// → GET https://my-store.myshopify.com/admin/api/2025-10/products.json
+
+// Disable automatic formatting
+const client = createAdminRestApiClient({
+  storeDomain: 'my-store.myshopify.com',
+  apiVersion: '2025-10',
+  accessToken: 'token',
+  formatPaths: false,
+});
+
+client.get('/admin/api/2025-10/products.json');
+// → GET https://my-store.myshopify.com/admin/api/2025-10/products.json
+```
+
+## Search Parameters
+
+The `searchParams` option supports:
+
+- **Primitives**: strings, numbers, booleans
+- **Arrays**: converted to `key[]=value` format
+- **Objects**: converted to `key[nested]=value` format
+
+```typescript
+{
+  searchParams: {
+    limit: 10,                    // → limit=10
+    fields: ['id', 'title'],      // → fields[]=id&fields[]=title
+    created_at: {
+      min: '2024-01-01',          // → created_at[min]=2024-01-01
+      max: '2024-12-31',          // → created_at[max]=2024-12-31
+    },
+  }
+}
+```
+
+## Types
+
+```typescript
+type SearchParams = Record<string, SearchParamFields>;
+
+type SearchParamFields =
+  | string
+  | number
+  | SearchParamField[]
+  | Record<string, SearchParamField | SearchParamField[]>;
+
+type HeaderOptions = Record<string, string | number | string[]>;
+
+interface GetRequestOptions {
+  headers?: HeaderOptions;
+  searchParams?: SearchParams;
+  retries?: number;
+  apiVersion?: string;
+}
+
+interface PostRequestOptions extends GetRequestOptions {
+  data: Record<string, any> | string;
+}
+
+interface PutRequestOptions extends PostRequestOptions {}
+
+interface DeleteRequestOptions extends GetRequestOptions {}
+```
+
+## Related
+
+- [Admin API Client (GraphQL)](/api-reference/admin-api-client)
+- [Shopify Admin REST API Reference](https://shopify.dev/api/admin-rest)

@@ -1,0 +1,203 @@
+---
+title: Session Storage Overview
+description: Learn about session storage in Shopify apps and how to persist user sessions across requests
+---
+
+Session storage is a critical component of Shopify apps that allows you to persist user authentication data and other session information across requests. The Shopify App JavaScript SDK provides a flexible session storage system with multiple database adapters.
+
+## What is Session Storage?
+
+When a user installs or accesses your Shopify app, the OAuth flow generates a session containing:
+
+- Access tokens for making API requests
+- Shop information
+- User details (for online sessions)
+- Token expiration times
+- OAuth state information
+
+These sessions must be stored securely and retrieved efficiently to maintain app functionality.
+
+## The SessionStorage Interface
+
+All session storage implementations in the SDK implement the `SessionStorage` interface, which defines five core methods:
+
+```typescript
+interface SessionStorage {
+  storeSession(session: Session): Promise<boolean>;
+  loadSession(id: string): Promise<Session | undefined>;
+  deleteSession(id: string): Promise<boolean>;
+  deleteSessions(ids: string[]): Promise<boolean>;
+  findSessionsByShop(shop: string): Promise<Session[]>;
+}
+```
+
+### Key Methods
+
+<ParamField path="storeSession" type="(session: Session) => Promise<boolean>">
+  Creates or updates a session in storage. Returns `true` on success.
+</ParamField>
+
+<ParamField path="loadSession" type="(id: string) => Promise<Session | undefined>">
+  Retrieves a session by its ID. Returns `undefined` if not found.
+</ParamField>
+
+<ParamField path="deleteSession" type="(id: string) => Promise<boolean>">
+  Deletes a single session from storage.
+</ParamField>
+
+<ParamField path="deleteSessions" type="(ids: string[]) => Promise<boolean>">
+  Deletes multiple sessions in a single operation.
+</ParamField>
+
+<ParamField path="findSessionsByShop" type="(shop: string) => Promise<Session[]>">
+  Finds all sessions associated with a specific shop.
+</ParamField>
+
+## Available Adapters
+
+The SDK provides official adapters for various database systems:
+
+<CardGroup cols={2}>
+  <Card title="PostgreSQL" icon="database" href="/session-storage/adapters#postgresql">
+    Production-ready relational database
+  </Card>
+  <Card title="MySQL" icon="database" href="/session-storage/adapters#mysql">
+    Popular relational database
+  </Card>
+  <Card title="Redis" icon="bolt" href="/session-storage/adapters#redis">
+    High-performance in-memory store
+  </Card>
+  <Card title="MongoDB" icon="leaf" href="/session-storage/adapters#mongodb">
+    Flexible document database
+  </Card>
+  <Card title="DynamoDB" icon="aws" href="/session-storage/adapters#dynamodb">
+    AWS serverless database
+  </Card>
+  <Card title="SQLite" icon="database" href="/session-storage/adapters#sqlite">
+    Lightweight file-based database
+  </Card>
+  <Card title="Drizzle" icon="droplet" href="/session-storage/adapters#drizzle">
+    Type-safe ORM for SQL databases
+  </Card>
+  <Card title="Prisma" icon="triangle" href="/session-storage/adapters#prisma">
+    Modern database toolkit
+  </Card>
+  <Card title="Cloudflare KV" icon="cloud" href="/session-storage/adapters#cloudflare-kv">
+    Edge-compatible key-value store
+  </Card>
+  <Card title="Memory" icon="memory" href="/session-storage/adapters#memory">
+    In-memory storage for development
+  </Card>
+</CardGroup>
+
+## Choosing an Adapter
+
+Consider these factors when selecting a session storage adapter:
+
+### Production Apps
+
+For production environments, choose a persistent database:
+
+- **PostgreSQL** or **MySQL** - Best for traditional server deployments
+- **Redis** - Excellent for high-traffic apps requiring fast access
+- **MongoDB** - Good for flexible schema requirements
+- **DynamoDB** - Ideal for AWS serverless architectures
+- **Prisma/Drizzle** - When using these ORMs in your stack
+
+### Serverless/Edge Deployments
+
+- **Cloudflare KV** - Perfect for Cloudflare Workers
+- **DynamoDB** - Great for AWS Lambda
+- **Redis** - Works well with serverless when using managed services
+
+### Development & Testing
+
+- **Memory** - Quick setup, no configuration needed
+- **SQLite** - Simple file-based storage for local development
+
+<Warning>
+  Never use `MemorySessionStorage` in production. Sessions are lost when the process restarts.
+</Warning>
+
+## Session Data Structure
+
+Sessions store the following information:
+
+```typescript
+{
+  id: string;              // Unique session identifier
+  shop: string;            // Shop domain (e.g., 'example.myshopify.com')
+  state: string;           // OAuth state parameter
+  isOnline: boolean;       // Online vs offline session
+  scope?: string;          // Granted API scopes
+  expires?: Date;          // Session expiration time
+  accessToken?: string;    // API access token
+  refreshToken?: string;   // Token refresh capability
+  refreshTokenExpires?: Date;
+  // Online session user info
+  userId?: number;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  accountOwner?: boolean;
+  locale?: string;
+  collaborator?: boolean;
+  emailVerified?: boolean;
+}
+```
+
+## Database Schema Requirements
+
+Most adapters automatically create the necessary tables/collections, but you should understand the schema:
+
+### Relational Databases (PostgreSQL, MySQL, SQLite)
+
+The default table structure includes:
+
+- Primary key on `id`
+- Indexed `shop` column for efficient lookups
+- All session fields as columns
+- Automatic migrations handled by the SDK
+
+### Document Databases (MongoDB)
+
+Stores sessions as documents with the session ID as the primary key.
+
+### Key-Value Stores (Redis, KV)
+
+Uses the session ID as the key and serialized JSON as the value.
+
+## Migration Support
+
+Relational database adapters include built-in migration support:
+
+- Automatic schema creation on first run
+- Migration tracking to prevent duplicate migrations
+- Backwards-compatible schema updates
+
+<Note>
+  The SDK handles migrations automatically. You don't need to run migration commands manually.
+</Note>
+
+## Security Considerations
+
+<Warning>
+  Session storage contains sensitive data including access tokens. Always:
+  
+  - Use encrypted connections to your database
+  - Restrict database access with proper authentication
+  - Use environment variables for connection credentials
+  - Never commit credentials to version control
+  - Enable encryption at rest when available
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SessionStorage Interface" icon="code" href="/session-storage/session-storage-interface">
+    Detailed interface documentation
+  </Card>
+  <Card title="Database Adapters" icon="plug" href="/session-storage/adapters">
+    Setup guides for each adapter
+  </Card>
+</CardGroup>

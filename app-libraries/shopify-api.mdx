@@ -1,0 +1,628 @@
+---
+title: "@shopify/shopify-api"
+description: Framework-agnostic core library for building Shopify apps with OAuth, APIs, webhooks, and more
+---
+
+`@shopify/shopify-api` is the foundation library for building Shopify apps in Node.js and JavaScript runtime environments. It provides OAuth authentication, Admin and Storefront API clients, webhook handling, billing integration, and session management.
+
+## Installation
+
+```bash
+npm install @shopify/shopify-api
+```
+
+<Note>
+Requires Node.js >= 20.0.0
+</Note>
+
+## Getting Started
+
+### Initialize the API
+
+The `shopifyApi()` function creates a configured Shopify API instance:
+
+```typescript
+import { shopifyApi, ApiVersion, LogSeverity } from "@shopify/shopify-api";
+import "@shopify/shopify-api/adapters/node";
+
+const shopify = shopifyApi({
+  // Required: API credentials
+  apiKey: process.env.SHOPIFY_API_KEY,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET,
+  
+  // Required: OAuth scopes
+  scopes: ["read_products", "write_products"],
+  
+  // Required: Your app's hostname
+  hostName: process.env.HOST?.replace(/https?:\/\//, ""),
+  
+  // Required: API version
+  apiVersion: ApiVersion.January24,
+  
+  // Whether app is embedded in Shopify Admin
+  isEmbeddedApp: true,
+  
+  // Custom store app settings
+  isCustomStoreApp: false,
+  
+  // Logging configuration
+  logger: {
+    level: LogSeverity.Info,
+    httpRequests: true,
+    timestamps: true,
+  },
+});
+```
+
+### Configuration Parameters
+
+<ParamField path="apiKey" type="string">
+  Your app's API key (Client ID). Found in Partner Dashboard.
+</ParamField>
+
+<ParamField path="apiSecretKey" type="string" required>
+  Your app's API secret (Client Secret). Found in Partner Dashboard.
+</ParamField>
+
+<ParamField path="scopes" type="string[] | AuthScopes">
+  OAuth scopes your app needs. Not required for Shopify managed installation.
+  
+  Examples: `["read_products", "write_orders"]`
+</ParamField>
+
+<ParamField path="hostName" type="string" required>
+  Your app's hostname (without protocol).
+  
+  Example: `"myapp.example.com"`
+</ParamField>
+
+<ParamField path="hostScheme" type="'http' | 'https'" default="https">
+  URL scheme for your app.
+</ParamField>
+
+<ParamField path="apiVersion" type="ApiVersion" required>
+  Shopify API version to use.
+  
+  Example: `ApiVersion.January24`
+</ParamField>
+
+<ParamField path="isEmbeddedApp" type="boolean" required>
+  Whether the app is embedded in Shopify Admin.
+</ParamField>
+
+<ParamField path="isCustomStoreApp" type="boolean" default="false">
+  Whether this is a custom store app (private app).
+</ParamField>
+
+<ParamField path="adminApiAccessToken" type="string">
+  App-wide access token for custom apps only.
+</ParamField>
+
+<ParamField path="restResources" type="ShopifyRestResources">
+  REST resources for type-safe REST API access.
+  
+  ```typescript
+  import { restResources } from "@shopify/shopify-api/rest/admin/2024-01";
+  ```
+</ParamField>
+
+## Authentication
+
+### OAuth Flow
+
+<Steps>
+  <Step title="Begin OAuth">
+    Start the OAuth process:
+    
+    ```typescript
+    // Redirect user to Shopify authorization
+    const authRoute = await shopify.auth.begin({
+      shop: "example.myshopify.com",
+      callbackPath: "/auth/callback",
+      isOnline: false,
+      rawRequest: request,
+      rawResponse: response,
+    });
+    ```
+  </Step>
+  
+  <Step title="Handle Callback">
+    Process the OAuth callback:
+    
+    ```typescript
+    // In your /auth/callback route
+    const callback = await shopify.auth.callback({
+      rawRequest: request,
+      rawResponse: response,
+    });
+    
+    const { session, headers } = callback;
+    
+    // Save session to your database
+    await sessionStorage.storeSession(session);
+    ```
+  </Step>
+  
+  <Step title="Validate Requests">
+    Validate authenticated requests:
+    
+    ```typescript
+    // Validate session token (for embedded apps)
+    const sessionId = await shopify.session.getCurrentId({
+      isOnline: true,
+      rawRequest: request,
+      rawResponse: response,
+    });
+    
+    // Load session from storage
+    const session = await sessionStorage.loadSession(sessionId);
+    ```
+  </Step>
+</Steps>
+
+### Session Management
+
+The `Session` class stores authentication data:
+
+```typescript
+import { Session } from "@shopify/shopify-api";
+
+// Create a session
+const session = new Session({
+  id: "offline_shop.myshopify.com",
+  shop: "shop.myshopify.com",
+  state: "state-value",
+  isOnline: false,
+});
+
+// Session properties
+session.id;              // Unique session identifier
+session.shop;            // Shop domain
+session.accessToken;     // OAuth access token
+session.scope;           // Granted scopes
+session.expires;         // Token expiration date
+session.isOnline;        // Online vs offline token
+session.onlineAccessInfo; // User info for online tokens
+```
+
+## API Clients
+
+### GraphQL Client
+
+Make GraphQL requests to the Admin API:
+
+```typescript
+import { GraphqlQueryError } from "@shopify/shopify-api";
+
+// Create client
+const client = new shopify.clients.Graphql({ session });
+
+// Make a request
+try {
+  const response = await client.request(
+    `query getProducts($first: Int!) {
+      products(first: $first) {
+        edges {
+          node {
+            id
+            title
+            handle
+          }
+        }
+      }
+    }`,
+    {
+      variables: { first: 10 },
+    }
+  );
+  
+  const products = response.data.products.edges;
+} catch (error) {
+  if (error instanceof GraphqlQueryError) {
+    console.error("GraphQL errors:", error.body?.errors);
+  }
+}
+```
+
+<Accordion title="GraphQL Client Methods">
+  <ParamField path="request" type="function">
+    Execute a GraphQL query or mutation.
+    
+    **Parameters:**
+    - `operation` (string): GraphQL query/mutation
+    - `options` (object):
+      - `variables`: Query variables
+      - `headers`: Custom headers
+      - `retries`: Number of retry attempts
+    
+    **Returns:** `Promise<{data, extensions}>`
+  </ParamField>
+</Accordion>
+
+### REST Client
+
+Make REST API requests:
+
+```typescript
+import { restResources } from "@shopify/shopify-api/rest/admin/2024-01";
+
+const shopify = shopifyApi({
+  // ... other config
+  restResources,
+});
+
+// Create client
+const client = new shopify.clients.Rest({ session });
+
+// Make requests
+const response = await client.get({
+  path: "products",
+  query: { limit: 10 },
+});
+
+const products = response.body.products;
+```
+
+<CodeGroup>
+```typescript GET Request
+const response = await client.get({
+  path: "products/123",
+});
+```
+
+```typescript POST Request
+const response = await client.post({
+  path: "products",
+  data: {
+    product: {
+      title: "New Product",
+      body_html: "<p>Product description</p>",
+    },
+  },
+  type: "application/json",
+});
+```
+
+```typescript PUT Request
+const response = await client.put({
+  path: "products/123",
+  data: {
+    product: {
+      title: "Updated Title",
+    },
+  },
+  type: "application/json",
+});
+```
+
+```typescript DELETE Request
+const response = await client.delete({
+  path: "products/123",
+});
+```
+</CodeGroup>
+
+### REST Resources (Type-Safe)
+
+Use typed REST resources for better developer experience:
+
+```typescript
+import { restResources } from "@shopify/shopify-api/rest/admin/2024-01";
+
+const shopify = shopifyApi({
+  restResources,
+  // ... other config
+});
+
+// Use typed resources
+const products = await shopify.rest.Product.all({
+  session,
+  limit: 10,
+});
+
+const product = await shopify.rest.Product.find({
+  session,
+  id: 123,
+});
+
+const newProduct = new shopify.rest.Product({ session });
+newProduct.title = "My New Product";
+newProduct.vendor = "My Vendor";
+await newProduct.save({ update: true });
+```
+
+### Storefront API Client
+
+Access the Storefront API:
+
+```typescript
+const client = new shopify.clients.Storefront({
+  domain: "shop.myshopify.com",
+  storefrontAccessToken: "your-storefront-token",
+});
+
+const response = await client.request(
+  `query { 
+    products(first: 10) { 
+      edges { 
+        node { 
+          id 
+          title 
+        } 
+      } 
+    } 
+  }`
+);
+```
+
+## Webhooks
+
+### Register Webhooks
+
+<Tabs>
+  <Tab title="HTTP Webhooks">
+    ```typescript
+    import { DeliveryMethod } from "@shopify/shopify-api";
+    
+    shopify.webhooks.addHandlers({
+      PRODUCTS_CREATE: {
+        deliveryMethod: DeliveryMethod.Http,
+        callbackUrl: "https://myapp.com/webhooks/products/create",
+        callback: async (topic, shop, body, webhookId) => {
+          const payload = JSON.parse(body);
+          console.log(`Product created: ${payload.id}`);
+        },
+      },
+      ORDERS_PAID: {
+        deliveryMethod: DeliveryMethod.Http,
+        callbackUrl: "https://myapp.com/webhooks/orders/paid",
+        callback: async (topic, shop, body) => {
+          // Handle order paid webhook
+        },
+      },
+    });
+    
+    // Register webhooks for a shop
+    await shopify.webhooks.register({ session });
+    ```
+  </Tab>
+  
+  <Tab title="EventBridge Webhooks">
+    ```typescript
+    import { DeliveryMethod } from "@shopify/shopify-api";
+    
+    shopify.webhooks.addHandlers({
+      PRODUCTS_UPDATE: {
+        deliveryMethod: DeliveryMethod.EventBridge,
+        arn: "arn:aws:events:us-east-1:123456789012:event-bus/shopify-webhooks",
+      },
+    });
+    ```
+  </Tab>
+  
+  <Tab title="PubSub Webhooks">
+    ```typescript
+    import { DeliveryMethod } from "@shopify/shopify-api";
+    
+    shopify.webhooks.addHandlers({
+      CUSTOMERS_CREATE: {
+        deliveryMethod: DeliveryMethod.PubSub,
+        pubSubProject: "my-project-id",
+        pubSubTopic: "shopify-webhooks",
+      },
+    });
+    ```
+  </Tab>
+</Tabs>
+
+### Validate & Process Webhooks
+
+```typescript
+import "@shopify/shopify-api/adapters/node";
+
+// In your webhook handler endpoint
+export async function handleWebhook(request, response) {
+  // Validate webhook
+  const isValid = await shopify.webhooks.validate({
+    rawBody: await request.text(),
+    rawRequest: request,
+  });
+  
+  if (!isValid) {
+    return response.status(401).send("Unauthorized");
+  }
+  
+  // Process webhook
+  await shopify.webhooks.process({
+    rawBody: await request.text(),
+    rawRequest: request,
+  });
+  
+  return response.status(200).send("OK");
+}
+```
+
+## Billing
+
+### Request Billing Approval
+
+```typescript
+import { BillingInterval } from "@shopify/shopify-api";
+
+const shopify = shopifyApi({
+  // ... other config
+  billing: {
+    "My Plan": {
+      amount: 10.0,
+      currencyCode: "USD",
+      interval: BillingInterval.Every30Days,
+    },
+  },
+});
+
+// Request payment
+const response = await shopify.billing.request({
+  session,
+  plan: "My Plan",
+  isTest: true, // Test mode
+});
+
+// Redirect merchant to confirmation URL
+redirect(response.confirmationUrl);
+```
+
+### Check Billing Status
+
+```typescript
+// Check if shop has active subscription
+const hasActivePayment = await shopify.billing.check({
+  session,
+  plans: ["My Plan"],
+  isTest: true,
+});
+
+if (!hasActivePayment) {
+  // Request billing approval
+}
+```
+
+### Usage-Based Billing
+
+```typescript
+// Create usage record
+await shopify.billing.createUsageRecord({
+  session,
+  subscriptionLineItemId: "gid://shopify/AppSubscriptionLineItem/123",
+  price: 1.0,
+  description: "API call",
+});
+```
+
+## Utilities
+
+### Shop Validation
+
+```typescript
+const shop = shopify.utils.sanitizeShop("example.myshopify.com");
+// Returns: "example.myshopify.com" or null if invalid
+```
+
+### HMAC Validation
+
+```typescript
+const isValid = shopify.utils.validateHmac({
+  hmac: "received-hmac",
+  secret: shopify.config.apiSecretKey,
+  query: request.query,
+});
+```
+
+### Decode Session Token
+
+```typescript
+const payload = await shopify.session.decodeSessionToken(
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+);
+
+console.log(payload.dest); // Shop domain
+console.log(payload.sub);  // User ID
+```
+
+## Runtime Adapters
+
+The library supports multiple JavaScript runtimes:
+
+<Tabs>
+  <Tab title="Node.js">
+    ```typescript
+    import "@shopify/shopify-api/adapters/node";
+    import { shopifyApi } from "@shopify/shopify-api";
+    
+    const shopify = shopifyApi({ /* config */ });
+    ```
+  </Tab>
+  
+  <Tab title="Cloudflare Workers">
+    ```typescript
+    import "@shopify/shopify-api/adapters/cf-worker";
+    import { shopifyApi } from "@shopify/shopify-api";
+    
+    const shopify = shopifyApi({ /* config */ });
+    ```
+  </Tab>
+  
+  <Tab title="Web API (Deno, Bun)">
+    ```typescript
+    import "@shopify/shopify-api/adapters/web-api";
+    import { shopifyApi } from "@shopify/shopify-api";
+    
+    const shopify = shopifyApi({ /* config */ });
+    ```
+  </Tab>
+</Tabs>
+
+## Error Handling
+
+```typescript
+import {
+  GraphqlQueryError,
+  HttpResponseError,
+  InvalidHmacError,
+  InvalidJwtError,
+  MissingRequiredArgument,
+  SessionNotFound,
+} from "@shopify/shopify-api";
+
+try {
+  await client.request(query);
+} catch (error) {
+  if (error instanceof GraphqlQueryError) {
+    console.error("GraphQL errors:", error.body?.errors);
+  } else if (error instanceof HttpResponseError) {
+    console.error("HTTP error:", error.response.code);
+  } else if (error instanceof InvalidJwtError) {
+    console.error("Invalid session token");
+  }
+}
+```
+
+<Warning>
+  Always validate sessions and webhooks before processing requests to ensure security.
+</Warning>
+
+## API Reference
+
+The `shopifyApi()` function returns an object with these properties:
+
+```typescript
+interface Shopify {
+  config: ConfigInterface;        // Configuration
+  clients: ShopifyClients;        // API clients
+  auth: ShopifyAuth;              // OAuth methods
+  session: ShopifySession;        // Session utilities
+  utils: ShopifyUtils;            // Helper functions
+  webhooks: ShopifyWebhooks;      // Webhook handling
+  billing: ShopifyBilling;        // Billing API
+  logger: ShopifyLogger;          // Logging
+  rest: ShopifyRestResources;     // REST resources
+  flow: ShopifyFlow;              // Shopify Flow
+  fulfillmentService: FulfillmentService; // Fulfillment
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Remix Integration" icon="react" href="/app-libraries/shopify-app-remix">
+    Learn how to use with Remix
+  </Card>
+  <Card title="Express Integration" icon="server" href="/app-libraries/shopify-app-express">
+    Learn how to use with Express
+  </Card>
+  <Card title="Session Storage" icon="database">
+    Configure session storage backends
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/Shopify/shopify-app-js/tree/main/packages/apps/shopify-api">
+    View on GitHub
+  </Card>
+</CardGroup>

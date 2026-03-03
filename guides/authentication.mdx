@@ -1,0 +1,300 @@
+---
+title: Authentication
+description: Learn how to implement OAuth authentication in your Shopify app
+---
+
+This guide covers OAuth authentication flows for Shopify apps using the Shopify API library.
+
+## OAuth Flow
+
+The library provides two main authentication methods:
+
+1. **OAuth flow** - For public apps
+2. **Token exchange** - For embedded apps (recommended)
+
+### Standard OAuth Flow
+
+The OAuth flow involves two steps: beginning the OAuth process and handling the callback.
+
+<Steps>
+  <Step title="Begin OAuth">
+    Redirect the user to Shopify's OAuth authorization page.
+
+    ```typescript
+    app.get('/auth', async (req, res) => {
+      await shopify.auth.begin({
+        shop: req.query.shop,
+        callbackPath: '/auth/callback',
+        isOnline: false,
+        rawRequest: req,
+        rawResponse: res,
+      });
+    });
+    ```
+
+    **Parameters:**
+    - `shop` - The shop domain (e.g., `example.myshopify.com`)
+    - `callbackPath` - Where Shopify redirects after authorization
+    - `isOnline` - `true` for online tokens, `false` for offline tokens
+
+    The `begin` function creates a state cookie and redirects to Shopify's OAuth authorization endpoint.
+
+    Source: `lib/auth/oauth/oauth.ts:60-127`
+  </Step>
+
+  <Step title="Handle OAuth Callback">
+    Process the callback from Shopify and create a session.
+
+    ```typescript
+    app.get('/auth/callback', async (req, res) => {
+      try {
+        const {session, headers} = await shopify.auth.callback({
+          rawRequest: req,
+          rawResponse: res,
+        });
+
+        // Store the session
+        await shopify.config.sessionStorage.storeSession(session);
+
+        // Redirect to app
+        res.redirect(`/?shop=${session.shop}`);
+      } catch (error) {
+        console.error('Auth error:', error);
+        res.status(500).send('Authentication failed');
+      }
+    });
+    ```
+
+    The callback validates the HMAC, verifies the state cookie, and exchanges the authorization code for an access token.
+
+    Source: `lib/auth/oauth/oauth.ts:129-236`
+  </Step>
+</Steps>
+
+## Token Exchange (Recommended for Embedded Apps)
+
+Token exchange allows you to obtain access tokens using session tokens without redirecting users through OAuth.
+
+```typescript
+import {RequestedTokenType} from '@shopify/shopify-api';
+
+app.post('/api/auth/token-exchange', async (req, res) => {
+  const sessionToken = req.headers['authorization']?.replace('Bearer ', '');
+  
+  const {session} = await shopify.auth.tokenExchange({
+    shop: req.body.shop,
+    sessionToken,
+    requestedTokenType: RequestedTokenType.OfflineAccessToken,
+  });
+
+  await shopify.config.sessionStorage.storeSession(session);
+  
+  res.json({success: true});
+});
+```
+
+**Token Types:**
+- `RequestedTokenType.OnlineAccessToken` - User-specific access (expires)
+- `RequestedTokenType.OfflineAccessToken` - Shop-level access (long-lived)
+
+Source: `lib/auth/oauth/token-exchange.ts:32-79`
+
+## Online vs Offline Access Tokens
+
+<Tabs>
+  <Tab title="Offline Tokens">
+    **Offline access tokens** are tied to the shop and persist until uninstalled.
+
+    ```typescript
+    await shopify.auth.begin({
+      shop: 'example.myshopify.com',
+      callbackPath: '/auth/callback',
+      isOnline: false, // Offline token
+      rawRequest: req,
+      rawResponse: res,
+    });
+    ```
+
+    Use offline tokens for:
+    - Background jobs
+    - Webhooks
+    - Operations that don't require a specific user
+  </Tab>
+
+  <Tab title="Online Tokens">
+    **Online access tokens** are user-specific and have an expiration date.
+
+    ```typescript
+    await shopify.auth.begin({
+      shop: 'example.myshopify.com',
+      callbackPath: '/auth/callback',
+      isOnline: true, // Online token
+      rawRequest: req,
+      rawResponse: res,
+    });
+    ```
+
+    Online tokens include `onlineAccessInfo` with user details:
+
+    ```typescript
+    interface OnlineAccessInfo {
+      associated_user: {
+        id: number;
+        first_name: string;
+        last_name: string;
+        email: string;
+        account_owner: boolean;
+        locale: string;
+        collaborator: boolean;
+      };
+    }
+    ```
+
+    Source: `lib/session/session.ts:186-188`
+  </Tab>
+</Tabs>
+
+## Session Management
+
+After authentication, the library creates a `Session` object containing the access token.
+
+```typescript
+interface Session {
+  id: string;                    // Unique session identifier
+  shop: string;                  // Shop domain
+  state: string;                 // OAuth state
+  isOnline: boolean;            // Token type
+  scope?: string;               // Granted scopes
+  accessToken?: string;         // Access token
+  expires?: Date;               // Token expiration
+  onlineAccessInfo?: OnlineAccessInfo; // User info (online tokens only)
+}
+```
+
+### Validating Sessions
+
+```typescript
+const session = await shopify.config.sessionStorage.loadSession(sessionId);
+
+if (!session.isActive(shopify.config.scopes)) {
+  // Session is expired or scopes have changed - re-authenticate
+  return res.redirect('/auth');
+}
+```
+
+Source: `lib/session/session.ts:198-206`
+
+## Error Handling
+
+The library throws specific errors during authentication:
+
+```typescript
+import {
+  BotActivityDetected,
+  CookieNotFound,
+  InvalidOAuthError,
+} from '@shopify/shopify-api';
+
+try {
+  const {session} = await shopify.auth.callback({...});
+} catch (error) {
+  if (error instanceof BotActivityDetected) {
+    // Bot detected, return 410 Gone
+    return res.status(410).send('Bot activity detected');
+  }
+  
+  if (error instanceof CookieNotFound) {
+    // OAuth state cookie missing
+    return res.redirect('/auth');
+  }
+  
+  if (error instanceof InvalidOAuthError) {
+    // Invalid callback parameters or HMAC
+    return res.status(400).send('Invalid OAuth callback');
+  }
+}
+```
+
+Source: `lib/error.ts:94-96`
+
+<Note>
+The OAuth flow includes bot detection using the `isbot` library. Bot requests receive a 410 Gone status.
+
+Source: `lib/auth/oauth/oauth.ts:82-86`
+</Note>
+
+## HMAC Validation
+
+All OAuth callbacks are automatically validated using HMAC signatures:
+
+```typescript
+// The library automatically validates:
+// 1. HMAC signature from Shopify
+// 2. State parameter matches cookie
+// 3. Shop domain is valid
+```
+
+Source: `lib/auth/oauth/oauth.ts:238-251`
+
+## Complete Example
+
+<CodeGroup>
+```typescript Express
+import express from 'express';
+import {shopifyApi, RequestedTokenType} from '@shopify/shopify-api';
+
+const shopify = shopifyApi({...});
+const app = express();
+
+// Begin OAuth
+app.get('/auth', async (req, res) => {
+  await shopify.auth.begin({
+    shop: req.query.shop,
+    callbackPath: '/auth/callback',
+    isOnline: false,
+    rawRequest: req,
+    rawResponse: res,
+  });
+});
+
+// OAuth callback
+app.get('/auth/callback', async (req, res) => {
+  const {session} = await shopify.auth.callback({
+    rawRequest: req,
+    rawResponse: res,
+  });
+
+  await shopify.config.sessionStorage.storeSession(session);
+  res.redirect(`/?shop=${session.shop}`);
+});
+```
+
+```typescript Token Exchange
+import {RequestedTokenType} from '@shopify/shopify-api';
+
+// Token exchange for embedded apps
+app.post('/api/auth/session', async (req, res) => {
+  const sessionToken = req.headers['authorization']?.replace('Bearer ', '');
+  
+  try {
+    const {session} = await shopify.auth.tokenExchange({
+      shop: req.body.shop,
+      sessionToken,
+      requestedTokenType: RequestedTokenType.OfflineAccessToken,
+    });
+
+    await shopify.config.sessionStorage.storeSession(session);
+    
+    res.json({accessToken: session.accessToken});
+  } catch (error) {
+    res.status(401).json({error: 'Token exchange failed'});
+  }
+});
+```
+</CodeGroup>
+
+<Warning>
+Never use OAuth authentication for private/custom apps. Private apps should use the `adminApiAccessToken` configuration instead.
+
+Source: `lib/auth/oauth/oauth.ts:253-260`
+</Warning>

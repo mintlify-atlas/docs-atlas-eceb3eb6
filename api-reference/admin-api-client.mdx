@@ -1,0 +1,309 @@
+---
+title: 'Admin API Client'
+description: 'GraphQL and REST client for Shopify Admin API'
+---
+
+The Admin API client provides both GraphQL and REST interfaces for interacting with the Shopify Admin API.
+
+## createAdminApiClient()
+
+Creates a GraphQL client for the Shopify Admin API.
+
+```typescript
+import { createAdminApiClient } from '@shopify/shopify-app-js';
+
+const client = createAdminApiClient({
+  storeDomain: 'my-store.myshopify.com',
+  apiVersion: '2025-10',
+  accessToken: 'shpat_xxxxx',
+});
+```
+
+### Parameters
+
+<ParamField path="storeDomain" type="string" required>
+  The Shopify store domain (e.g., `my-store.myshopify.com`)
+</ParamField>
+
+<ParamField path="apiVersion" type="string" required>
+  The Admin API version to use (e.g., `2025-10`)
+</ParamField>
+
+<ParamField path="accessToken" type="string" required>
+  Admin API access token for authentication
+</ParamField>
+
+<ParamField path="userAgentPrefix" type="string">
+  Optional prefix to add to the User-Agent header
+</ParamField>
+
+<ParamField path="retries" type="number" default="0">
+  Number of retry attempts for failed requests
+</ParamField>
+
+<ParamField path="customFetchApi" type="CustomFetchApi">
+  Custom fetch implementation (defaults to global `fetch`)
+</ParamField>
+
+<ParamField path="logger" type="ApiClientLogger">
+  Logger function for debugging and monitoring requests
+</ParamField>
+
+<ParamField path="isTesting" type="boolean">
+  Set to `true` to skip server-side usage validation during testing
+</ParamField>
+
+### Returns
+
+<ResponseField name="AdminApiClient" type="object">
+  Admin API client instance with the following properties:
+
+  <Expandable title="properties">
+    <ResponseField name="config" type="AdminApiClientConfig">
+      Read-only configuration object containing:
+      - `storeDomain`: The normalized store URL
+      - `apiVersion`: The API version in use
+      - `accessToken`: The access token
+      - `headers`: Default headers for all requests
+      - `apiUrl`: The complete API endpoint URL
+      - `userAgentPrefix`: Optional user agent prefix
+    </ResponseField>
+
+    <ResponseField name="getHeaders" type="(headers?: Headers) => Headers">
+      Returns merged headers combining default headers with optional overrides
+    </ResponseField>
+
+    <ResponseField name="getApiUrl" type="(apiVersion?: string) => string">
+      Returns the API URL, optionally for a different API version
+    </ResponseField>
+
+    <ResponseField name="fetch" type="function">
+      Low-level fetch method that returns a raw `Response` object
+      
+      ```typescript
+      const response = await client.fetch(query, {
+        variables: { id: 'gid://shopify/Product/123' },
+      });
+      ```
+    </ResponseField>
+
+    <ResponseField name="request" type="function">
+      GraphQL request method that returns parsed response data
+      
+      ```typescript
+      const { data, errors } = await client.request(query, {
+        variables: { id: 'gid://shopify/Product/123' },
+      });
+      ```
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Client Methods
+
+#### fetch()
+
+Executes a GraphQL operation and returns the raw response.
+
+```typescript
+const response = await client.fetch(
+  `query getProduct($id: ID!) {
+    product(id: $id) {
+      id
+      title
+    }
+  }`,
+  {
+    variables: { id: 'gid://shopify/Product/123' },
+  }
+);
+```
+
+<ParamField path="operation" type="string" required>
+  GraphQL query or mutation string
+</ParamField>
+
+<ParamField path="options" type="object">
+  Request options:
+  - `variables`: GraphQL variables object
+  - `headers`: Additional headers to merge with defaults
+  - `apiVersion`: Override the default API version
+  - `retries`: Override the default retry count
+  - `signal`: AbortSignal for request cancellation
+</ParamField>
+
+#### request()
+
+Executes a GraphQL operation and returns parsed response data.
+
+```typescript
+const { data, errors } = await client.request(
+  `mutation productUpdate($input: ProductInput!) {
+    productUpdate(input: $input) {
+      product { id title }
+      userErrors { field message }
+    }
+  }`,
+  {
+    variables: {
+      input: {
+        id: 'gid://shopify/Product/123',
+        title: 'New Title',
+      },
+    },
+  }
+);
+```
+
+Returns a `ClientResponse<TData>` object:
+
+<ResponseField name="data" type="TData">
+  The GraphQL response data
+</ResponseField>
+
+<ResponseField name="errors" type="ResponseErrors">
+  Error information if the request failed:
+  - `networkStatusCode`: HTTP status code
+  - `message`: Error message
+  - `graphQLErrors`: Array of GraphQL errors
+  - `response`: Raw Response object
+</ResponseField>
+
+<ResponseField name="extensions" type="object">
+  GraphQL extensions from the response
+</ResponseField>
+
+<ResponseField name="headers" type="Headers">
+  Response headers
+</ResponseField>
+
+## Example Usage
+
+<CodeGroup>
+
+```typescript Basic Query
+import { createAdminApiClient } from '@shopify/shopify-app-js';
+
+const client = createAdminApiClient({
+  storeDomain: 'my-store.myshopify.com',
+  apiVersion: '2025-10',
+  accessToken: process.env.SHOPIFY_ADMIN_TOKEN,
+});
+
+const { data, errors } = await client.request(
+  `query {
+    shop {
+      name
+      email
+    }
+  }`
+);
+
+if (errors) {
+  console.error('GraphQL errors:', errors);
+} else {
+  console.log('Shop name:', data.shop.name);
+}
+```
+
+```typescript With Variables
+const PRODUCT_QUERY = `
+  query getProduct($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      description
+      variants(first: 10) {
+        edges {
+          node {
+            id
+            price
+          }
+        }
+      }
+    }
+  }
+`;
+
+const { data } = await client.request(PRODUCT_QUERY, {
+  variables: {
+    id: 'gid://shopify/Product/7982376198326',
+  },
+});
+```
+
+```typescript Mutation
+const UPDATE_PRODUCT = `
+  mutation updateProduct($input: ProductInput!) {
+    productUpdate(input: $input) {
+      product {
+        id
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+const { data } = await client.request(UPDATE_PRODUCT, {
+  variables: {
+    input: {
+      id: 'gid://shopify/Product/7982376198326',
+      title: 'Updated Product Title',
+    },
+  },
+});
+
+if (data.productUpdate.userErrors.length > 0) {
+  console.error('Validation errors:', data.productUpdate.userErrors);
+}
+```
+
+```typescript With Custom Headers
+const { data } = await client.request(QUERY, {
+  variables: { id: productId },
+  headers: {
+    'X-Custom-Header': 'value',
+  },
+});
+```
+
+```typescript With Retries
+const client = createAdminApiClient({
+  storeDomain: 'my-store.myshopify.com',
+  apiVersion: '2025-10',
+  accessToken: process.env.SHOPIFY_ADMIN_TOKEN,
+  retries: 3, // Retry failed requests up to 3 times
+});
+```
+
+</CodeGroup>
+
+## Type Safety
+
+The Admin API client supports TypeScript type generation for full type safety. See the [API Codegen](/api-clients/api-codegen-preset) guide for details.
+
+```typescript
+import { createAdminApiClient } from '@shopify/shopify-app-js';
+import type { AdminQueries } from './generated/admin.types';
+
+const client = createAdminApiClient<AdminQueries>({
+  storeDomain: 'my-store.myshopify.com',
+  apiVersion: '2025-10',
+  accessToken: process.env.SHOPIFY_ADMIN_TOKEN,
+});
+
+// TypeScript will now provide autocomplete and type checking
+const { data } = await client.request('GetProduct', {
+  variables: { id: 'gid://shopify/Product/123' },
+});
+```
+
+## Related
+
+- [Admin REST API Client](/api-reference/admin-rest-api-client)
+- [GraphQL Client](/api-reference/graphql-client)
+- [API Codegen Guide](/api-clients/api-codegen-preset)

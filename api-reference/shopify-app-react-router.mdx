@@ -1,0 +1,351 @@
+---
+title: "@shopify/shopify-app-react-router"
+description: "React Router adapter for building Shopify apps with the Shopify App JavaScript SDK"
+---
+
+## Installation
+
+```bash
+npm install @shopify/shopify-app-react-router
+```
+
+## shopifyApp()
+
+Creates an object your app will use to interact with Shopify in a React Router application.
+
+### Function Signature
+
+```typescript
+function shopifyApp<
+  Config extends AppConfigArg<Storage, Future>,
+  Storage extends SessionStorage,
+  Future extends FutureFlagOptions = Config['future']
+>(appConfig: Readonly<Config>): ShopifyApp<Config>
+```
+
+### Configuration
+
+<ParamField path="appConfig" type="AppConfigArg" required>
+  Configuration options for your Shopify app
+
+  <Expandable title="properties">
+    <ParamField path="apiKey" type="string" required>
+      Your app's API key from the Shopify Partner Dashboard
+    </ParamField>
+
+    <ParamField path="apiSecretKey" type="string" required>
+      Your app's API secret key from the Shopify Partner Dashboard
+    </ParamField>
+
+    <ParamField path="scopes" type="string[]" required>
+      The access scopes your app needs
+    </ParamField>
+
+    <ParamField path="appUrl" type="string" required>
+      The URL your app is running on. For development, this is typically a tunnel URL. For production, this is your production URL.
+    </ParamField>
+
+    <ParamField path="apiVersion" type="ApiVersion" required>
+      The version of Shopify's Admin API to use
+    </ParamField>
+
+    <ParamField path="sessionStorage" type="SessionStorage">
+      An adapter for storing sessions in your database of choice. Optional for apps created in the Shopify Admin.
+    </ParamField>
+
+    <ParamField path="useOnlineTokens" type="boolean" default="false">
+      Whether your app uses online or offline tokens. If true, both online and offline tokens will be saved.
+    </ParamField>
+
+    <ParamField path="distribution" type="AppDistribution" default="AppDistribution.AppStore">
+      How your app is distributed:
+      - `AppDistribution.AppStore` - Public apps in the Shopify App Store
+      - `AppDistribution.SingleMerchant` - Custom apps in Partner Dashboard
+      - `AppDistribution.ShopifyAdmin` - Apps managed in merchant's Shopify Admin
+    </ParamField>
+
+    <ParamField path="authPathPrefix" type="string" default="/auth">
+      A path that Shopify can reserve for auth-related endpoints. Must match a $ route in your React Router app.
+    </ParamField>
+
+    <ParamField path="webhooks" type="WebhookConfig">
+      Shop-specific webhook configuration. For most cases, define app-specific webhooks in `shopify.app.toml` instead.
+    </ParamField>
+
+    <ParamField path="hooks" type="HooksConfig">
+      Lifecycle hooks for your app
+
+      <Expandable title="properties">
+        <ParamField path="afterAuth" type="(options: AfterAuthOptions) => void | Promise<void>">
+          Function called after a merchant installs your app
+        </ParamField>
+      </Expandable>
+    </ParamField>
+
+    <ParamField path="billing" type="BillingConfigWithLineItems">
+      Billing configuration using line items format for complex billing structures
+    </ParamField>
+
+    <ParamField path="future" type="FutureFlagOptions">
+      Opt-in flags for upcoming breaking changes and new features
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Return Value
+
+Returns a `ShopifyApp` object with the following properties:
+
+<ResponseField name="sessionStorage" type="SessionStorage">
+  The SessionStorage instance you passed in as a config option
+</ResponseField>
+
+<ResponseField name="addDocumentResponseHeaders" type="(request: Request, headers: Headers) => void">
+  Adds required Content Security Policy headers for Shopify apps to the given Headers object
+</ResponseField>
+
+<ResponseField name="registerWebhooks" type="(options: RegisterWebhooksOptions) => Promise<RegisterReturn | void>">
+  Register shop-specific webhook subscriptions using the Admin GraphQL API
+</ResponseField>
+
+<ResponseField name="authenticate" type="object">
+  Methods for authenticating requests from different Shopify surfaces
+
+  <Expandable title="properties">
+    <ResponseField name="admin" type="(request: Request) => Promise<AdminContext>">
+      Authenticate admin requests from your app's UI or admin extensions
+
+      **Returns:** `AdminContext` with:
+      - `session: Session` - The session for the user who made the request
+      - `admin: AdminApiContext` - Methods for interacting with the GraphQL Admin API
+      - `billing: BillingContext` - Billing methods based on your config
+      - `cors: EnsureCORSFunction` - Helper to set CORS headers
+      - `sessionToken: JwtPayload` - Decoded session token (embedded apps only)
+      - `redirect: RedirectFunction` - Redirect helper for embedded apps
+      - `scopes: ScopesApiContext` - Methods to manage scopes
+    </ResponseField>
+
+    <ResponseField name="flow" type="(request: Request) => Promise<FlowContext>">
+      Authenticate Flow extension requests
+
+      **Returns:** `FlowContext` with:
+      - `admin: AdminApiContext` - Admin API access
+      - `session: Session` - The session
+      - `payload: object` - The Flow request payload
+    </ResponseField>
+
+    <ResponseField name="fulfillmentService" type="(request: Request) => Promise<FulfillmentServiceContext>">
+      Authenticate fulfillment service requests
+
+      **Returns:** `FulfillmentServiceContext` with:
+      - `admin: AdminApiContext` - Admin API access
+      - `session: Session` - The session
+    </ResponseField>
+
+    <ResponseField name="pos" type="(request: Request) => Promise<POSContext>">
+      Authenticate POS UI extension requests
+
+      **Returns:** `POSContext` with:
+      - `sessionToken: JwtPayload` - The decoded session token
+      - `cors: EnsureCORSFunction` - Helper to set CORS headers
+    </ResponseField>
+
+    <ResponseField name="public" type="object">
+      Authenticate public requests from various surfaces
+
+      **Methods:**
+      - `checkout(request: Request)` - Authenticate checkout extension requests
+      - `customerAccount(request: Request)` - Authenticate customer account requests
+      - `appProxy(request: Request)` - Authenticate app proxy requests
+    </ResponseField>
+
+    <ResponseField name="webhook" type="(request: Request) => Promise<WebhookContext>">
+      Authenticate Shopify webhook requests
+
+      **Returns:** `WebhookContext` with:
+      - `topic: string` - The webhook topic
+      - `shop: string` - The shop domain
+      - `session: Session | undefined` - The session (may be undefined if app is uninstalled)
+      - `payload: object` - The webhook payload
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="unauthenticated" type="object">
+  Methods for creating contexts from non-Shopify requests
+
+  <Expandable title="properties">
+    <ResponseField name="admin" type="(shop: string) => Promise<UnauthenticatedAdminContext>">
+      Create an admin context for a specific shop without authentication
+
+      **Returns:** `UnauthenticatedAdminContext` with:
+      - `admin: AdminApiContext` - Admin API access
+    </ResponseField>
+
+    <ResponseField name="storefront" type="(shop: string) => Promise<UnauthenticatedStorefrontContext>">
+      Create a storefront context for a specific shop
+
+      **Returns:** `UnauthenticatedStorefrontContext` with:
+      - `storefront: StorefrontApiContext` - Storefront API access
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="login" type="(request: Request) => Promise<LoginError | never>">
+  Log a merchant in and redirect them to the app root. Not available when `distribution` is `AppDistribution.ShopifyAdmin`.
+
+  **Returns:** `LoginError` object with validation errors, or redirects on success
+</ResponseField>
+
+## Example Usage
+
+<CodeGroup>
+
+```typescript Basic Setup
+// app/shopify.server.ts
+import { shopifyApp } from "@shopify/shopify-app-react-router/server";
+import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
+import { ApiVersion } from "@shopify/shopify-api";
+import prisma from "~/db.server";
+
+const shopify = shopifyApp({
+  apiKey: process.env.SHOPIFY_API_KEY!,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET!,
+  scopes: process.env.SCOPES?.split(",")!,
+  appUrl: process.env.SHOPIFY_APP_URL!,
+  apiVersion: ApiVersion.October24,
+  sessionStorage: new PrismaSessionStorage(prisma),
+});
+
+export default shopify;
+export const authenticate = shopify.authenticate;
+```
+
+```typescript Loader Authentication
+// app/routes/_index.tsx
+import { LoaderFunctionArgs } from "react-router";
+import { authenticate } from "../shopify.server";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const { admin, session } = await authenticate.admin(request);
+  
+  const response = await admin.graphql(`
+    query {
+      shop {
+        name
+        email
+      }
+    }
+  `);
+  
+  const data = await response.json();
+  return data;
+}
+```
+
+```typescript Webhook Handler
+// app/routes/webhooks.tsx
+import { ActionFunctionArgs } from "react-router";
+import { authenticate } from "../shopify.server";
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { topic, shop, session, payload } = await authenticate.webhook(request);
+  
+  if (!session) {
+    throw new Response();
+  }
+  
+  console.log(`Webhook ${topic} received for ${shop}`);
+  console.log(JSON.stringify(payload, null, 2));
+  
+  return new Response();
+};
+```
+
+```typescript POS Extension
+// app/routes/pos/data.tsx
+import { LoaderFunctionArgs } from "react-router";
+import { authenticate } from "../../shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { sessionToken, cors } = await authenticate.pos(request);
+  
+  // Get shop from session token
+  const shop = sessionToken.dest;
+  
+  // Fetch data for POS
+  const data = await fetchPOSData(shop);
+  
+  return cors(data);
+};
+```
+
+```typescript AfterAuth Hook with Billing
+// app/shopify.server.ts
+import { shopifyApp, BillingInterval } from "@shopify/shopify-app-react-router/server";
+
+const shopify = shopifyApp({
+  // ... other config
+  billing: {
+    basicPlan: {
+      lineItems: [
+        {
+          amount: 10,
+          currencyCode: 'USD',
+          interval: BillingInterval.Every30Days,
+        },
+      ],
+    },
+  },
+  hooks: {
+    afterAuth: async ({ session, admin }) => {
+      console.log(`Shop ${session.shop} installed the app`);
+      
+      // Register webhooks
+      await shopify.registerWebhooks({ session });
+    },
+  },
+});
+
+export default shopify;
+```
+
+</CodeGroup>
+
+## Key Differences from Remix Adapter
+
+The React Router adapter is optimized for React Router v7+ and includes:
+
+1. **Token Exchange by Default**: Uses the token exchange authentication strategy by default (vs. auth code flow in Remix)
+2. **POS Authentication**: Includes `authenticate.pos()` for POS UI extension support
+3. **Line Item Billing**: Supports the newer line item billing format for complex billing structures
+4. **React Router Integration**: Built for React Router v7+ with appropriate type imports from `react-router`
+
+## Exported Types
+
+```typescript
+export {
+  LogSeverity,
+  DeliveryMethod,
+  BillingInterval,
+  BillingReplacementBehavior,
+  ApiVersion,
+  Session,
+  AppDistribution,
+  LoginErrorType,
+} from "@shopify/shopify-app-react-router/server";
+
+export type {
+  JwtPayload,
+  ShopifyApp,
+  LoginError,
+} from "@shopify/shopify-app-react-router/server";
+```
+
+## See Also
+
+- [Session Storage Options](https://github.com/Shopify/shopify-app-js/blob/main/README.md#session-storage-options)
+- [Shopify API Versions](https://shopify.dev/docs/api/)
+- [App Distribution](https://shopify.dev/docs/apps/distribution)
+- [React Router Documentation](https://reactrouter.com/)
+- [Webhooks Guide](https://shopify.dev/docs/apps/build/webhooks)

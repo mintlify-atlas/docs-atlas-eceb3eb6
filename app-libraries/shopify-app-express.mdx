@@ -1,0 +1,711 @@
+---
+title: "@shopify/shopify-app-express"
+description: Build Shopify apps with Express.js - middleware for authentication, webhooks, and API access
+---
+
+`@shopify/shopify-app-express` provides Express middleware and utilities for building Shopify apps. It wraps `@shopify/shopify-api` with Express-specific helpers for OAuth, session management, and request handling.
+
+## Installation
+
+```bash
+npm install @shopify/shopify-app-express express
+```
+
+<Note>
+Requires Node.js >= 20.0.0 and Express >= 5.0.0
+</Note>
+
+## Quick Start
+
+### 1. Initialize the App
+
+```typescript
+import express from "express";
+import { shopifyApp } from "@shopify/shopify-app-express";
+import { PostgreSQLSessionStorage } from "@shopify/shopify-app-session-storage-postgresql";
+import { ApiVersion } from "@shopify/shopify-api";
+
+const app = express();
+
+const shopify = shopifyApp({
+  api: {
+    apiVersion: ApiVersion.January24,
+    // Other API config is read from environment variables:
+    // SHOPIFY_API_KEY, SHOPIFY_API_SECRET, SCOPES, HOST
+  },
+  auth: {
+    path: "/auth",
+    callbackPath: "/auth/callback",
+  },
+  webhooks: {
+    path: "/webhooks",
+  },
+  sessionStorage: new PostgreSQLSessionStorage(
+    process.env.DATABASE_URL
+  ),
+});
+
+export default shopify;
+```
+
+### 2. Add Authentication Routes
+
+```typescript
+import shopify from "./shopify";
+
+// OAuth routes
+app.get("/auth", shopify.auth.begin());
+app.get("/auth/callback", shopify.auth.callback());
+
+// Start OAuth if not installed
+app.get("/", shopify.ensureInstalledOnShop(), async (req, res) => {
+  res.send("App is installed!");
+});
+```
+
+### 3. Protect Your Routes
+
+```typescript
+import shopify from "./shopify";
+
+// Require valid session
+app.get(
+  "/api/products",
+  shopify.validateAuthenticatedSession(),
+  async (req, res) => {
+    const session = res.locals.shopify.session;
+    
+    const client = new shopify.api.clients.Graphql({ session });
+    const response = await client.request(
+      `query { products(first: 10) { edges { node { id title } } } }`
+    );
+    
+    const data = await response.json();
+    res.json(data.data.products);
+  }
+);
+```
+
+### 4. Handle Webhooks
+
+```typescript
+app.post(
+  "/webhooks",
+  express.text({ type: "*/*" }),
+  shopify.processWebhooks({ webhookHandlers: {} })
+);
+```
+
+## Configuration
+
+### shopifyApp Options
+
+<ParamField path="api" type="object" required>
+  API configuration object. Most values are read from environment variables.
+  
+  **Required Environment Variables:**
+  - `SHOPIFY_API_KEY`: Your app's API key
+  - `SHOPIFY_API_SECRET`: Your app's API secret
+  - `SCOPES`: Comma-separated OAuth scopes
+  - `HOST`: Your app's URL (e.g., `https://myapp.com`)
+  
+  **Required in code:**
+  - `apiVersion`: API version (e.g., `ApiVersion.January24`)
+</ParamField>
+
+<ParamField path="auth" type="object" required>
+  Authentication configuration.
+  
+  ```typescript
+  auth: {
+    path: "/auth",              // OAuth start path
+    callbackPath: "/auth/callback", // OAuth callback path
+  }
+  ```
+</ParamField>
+
+<ParamField path="webhooks" type="object" required>
+  Webhook configuration.
+  
+  ```typescript
+  webhooks: {
+    path: "/webhooks",  // Webhook endpoint path
+  }
+  ```
+</ParamField>
+
+<ParamField path="sessionStorage" type="SessionStorage">
+  Session storage adapter. Defaults to in-memory storage (not for production).
+  
+  See [Session Storage](#session-storage) below.
+</ParamField>
+
+<ParamField path="useOnlineTokens" type="boolean" default="false">
+  Whether to use online access tokens.
+</ParamField>
+
+<ParamField path="exitIframePath" type="string" default="/exitiframe">
+  Path for the exit iframe helper page.
+</ParamField>
+
+### API Configuration
+
+The `api` object accepts all parameters from `@shopify/shopify-api`:
+
+```typescript
+const shopify = shopifyApp({
+  api: {
+    apiVersion: ApiVersion.January24,
+    
+    // Optional: override environment variables
+    apiKey: "custom-api-key",
+    apiSecretKey: "custom-secret",
+    scopes: ["read_products", "write_orders"],
+    hostName: "myapp.example.com",
+    
+    // Optional: REST resources
+    restResources: await import(
+      "@shopify/shopify-api/rest/admin/2024-01"
+    ),
+    
+    // Optional: billing
+    billing: {
+      "My Plan": {
+        amount: 10.0,
+        currencyCode: "USD",
+        interval: BillingInterval.Every30Days,
+      },
+    },
+  },
+  // ... other config
+});
+```
+
+## Middleware
+
+### auth.begin()
+
+Starts the OAuth flow:
+
+```typescript
+app.get("/auth", shopify.auth.begin());
+```
+
+<Accordion title="Options">
+  Can accept configuration overrides:
+  
+  ```typescript
+  app.get("/auth", shopify.auth.begin({
+    isOnline: true, // Request online token
+  }));
+  ```
+</Accordion>
+
+### auth.callback()
+
+Handles OAuth callback:
+
+```typescript
+app.get("/auth/callback", shopify.auth.callback());
+```
+
+After successful OAuth, redirects to `/` by default.
+
+### validateAuthenticatedSession()
+
+Ensures request has valid session:
+
+```typescript
+app.get(
+  "/api/products",
+  shopify.validateAuthenticatedSession(),
+  async (req, res) => {
+    // Access session
+    const session = res.locals.shopify.session;
+    
+    // Use API
+    const client = new shopify.api.clients.Graphql({ session });
+    // ...
+  }
+);
+```
+
+<Note>
+  The session is available at `res.locals.shopify.session`
+</Note>
+
+### ensureInstalledOnShop()
+
+Redirects to OAuth if shop doesn't have valid session:
+
+```typescript
+app.get("/", shopify.ensureInstalledOnShop(), (req, res) => {
+  res.send("App is installed!");
+});
+```
+
+### processWebhooks()
+
+Processes incoming webhooks:
+
+```typescript
+const webhookHandlers = {
+  PRODUCTS_CREATE: async (topic, shop, body, webhookId) => {
+    const payload = JSON.parse(body);
+    console.log(`Product created: ${payload.id}`);
+  },
+  APP_UNINSTALLED: async (topic, shop, body) => {
+    // Clean up shop data
+    await cleanupShopData(shop);
+  },
+};
+
+app.post(
+  "/webhooks",
+  express.text({ type: "*/*" }),
+  shopify.processWebhooks({ webhookHandlers })
+);
+```
+
+<Warning>
+  Always use `express.text({ type: "*/*" })` before webhook processing to get raw body for HMAC validation.
+</Warning>
+
+### cspHeaders()
+
+Adds Content Security Policy headers for embedded apps:
+
+```typescript
+app.use(shopify.cspHeaders());
+```
+
+### redirectToShopifyOrAppRoot()
+
+Handles redirects for embedded apps:
+
+```typescript
+app.get("/redirect", 
+  shopify.redirectToShopifyOrAppRoot()
+);
+```
+
+## Making API Requests
+
+### GraphQL Client
+
+```typescript
+import { GraphqlQueryError } from "@shopify/shopify-api";
+
+app.post(
+  "/api/update-product",
+  shopify.validateAuthenticatedSession(),
+  async (req, res) => {
+    const session = res.locals.shopify.session;
+    const client = new shopify.api.clients.Graphql({ session });
+    
+    try {
+      const response = await client.request(
+        `#graphql
+          mutation updateProduct($input: ProductInput!) {
+            productUpdate(input: $input) {
+              product {
+                id
+                title
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `,
+        {
+          variables: {
+            input: {
+              id: req.body.productId,
+              title: req.body.title,
+            },
+          },
+        }
+      );
+      
+      const data = await response.json();
+      res.json(data.data.productUpdate);
+    } catch (error) {
+      if (error instanceof GraphqlQueryError) {
+        res.status(500).json({ errors: error.body?.errors });
+      } else {
+        res.status(500).send("Error updating product");
+      }
+    }
+  }
+);
+```
+
+### REST Client
+
+```typescript
+app.get(
+  "/api/products",
+  shopify.validateAuthenticatedSession(),
+  async (req, res) => {
+    const session = res.locals.shopify.session;
+    const client = new shopify.api.clients.Rest({ session });
+    
+    const response = await client.get({
+      path: "products",
+      query: { limit: 10 },
+    });
+    
+    res.json(response.body.products);
+  }
+);
+```
+
+### REST Resources (Type-Safe)
+
+```typescript
+import { restResources } from "@shopify/shopify-api/rest/admin/2024-01";
+
+const shopify = shopifyApp({
+  api: {
+    restResources,
+    // ... other config
+  },
+});
+
+app.get(
+  "/api/products",
+  shopify.validateAuthenticatedSession(),
+  async (req, res) => {
+    const session = res.locals.shopify.session;
+    
+    // Type-safe REST resources
+    const products = await shopify.api.rest.Product.all({
+      session,
+      limit: 10,
+    });
+    
+    res.json(products);
+  }
+);
+```
+
+## Webhooks
+
+### Configure Webhooks
+
+<CodeGroup>
+```typescript HTTP Delivery
+import { DeliveryMethod } from "@shopify/shopify-api";
+
+const webhookHandlers = {
+  PRODUCTS_CREATE: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: "/webhooks",
+    callback: async (topic, shop, body, webhookId) => {
+      const product = JSON.parse(body);
+      console.log(`New product: ${product.title}`);
+    },
+  },
+  ORDERS_PAID: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: "/webhooks",
+    callback: async (topic, shop, body) => {
+      // Handle order paid
+    },
+  },
+};
+
+app.post(
+  "/webhooks",
+  express.text({ type: "*/*" }),
+  shopify.processWebhooks({ webhookHandlers })
+);
+```
+
+```typescript Register Webhooks
+import shopify from "./shopify";
+
+// Register webhooks after OAuth
+app.get("/auth/callback",
+  shopify.auth.callback(),
+  async (req, res) => {
+    const session = res.locals.shopify.session;
+    
+    // Register webhooks
+    await shopify.api.webhooks.register({ session });
+    
+    res.redirect("/");
+  }
+);
+```
+</CodeGroup>
+
+### Webhook Validation
+
+Webhooks are automatically validated by `processWebhooks()`. Manual validation:
+
+```typescript
+app.post("/webhooks", express.text({ type: "*/*" }), async (req, res) => {
+  const isValid = await shopify.api.webhooks.validate({
+    rawBody: req.body,
+    rawRequest: req,
+  });
+  
+  if (!isValid) {
+    return res.status(401).send("Unauthorized");
+  }
+  
+  // Process webhook
+  await shopify.api.webhooks.process({
+    rawBody: req.body,
+    rawRequest: req,
+  });
+  
+  res.status(200).send();
+});
+```
+
+## Session Storage
+
+Choose a session storage adapter:
+
+<Tabs>
+  <Tab title="PostgreSQL">
+    ```bash
+    npm install @shopify/shopify-app-session-storage-postgresql
+    ```
+    
+    ```typescript
+    import { PostgreSQLSessionStorage } from "@shopify/shopify-app-session-storage-postgresql";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new PostgreSQLSessionStorage(
+        process.env.DATABASE_URL
+      ),
+      // ... other config
+    });
+    ```
+  </Tab>
+  
+  <Tab title="MySQL">
+    ```bash
+    npm install @shopify/shopify-app-session-storage-mysql
+    ```
+    
+    ```typescript
+    import { MySQLSessionStorage } from "@shopify/shopify-app-session-storage-mysql";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new MySQLSessionStorage(
+        "mysql://user:pass@localhost:3306/dbname"
+      ),
+      // ... other config
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Redis">
+    ```bash
+    npm install @shopify/shopify-app-session-storage-redis
+    ```
+    
+    ```typescript
+    import { RedisSessionStorage } from "@shopify/shopify-app-session-storage-redis";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new RedisSessionStorage(
+        "redis://localhost:6379"
+      ),
+      // ... other config
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Memory (Dev Only)">
+    ```typescript
+    import { MemorySessionStorage } from "@shopify/shopify-app-session-storage-memory";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new MemorySessionStorage(),
+      // ... other config
+    });
+    ```
+    
+    <Warning>
+      Memory storage is for development only. Use a persistent storage in production.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Billing
+
+### Configure Billing Plans
+
+```typescript
+import { BillingInterval } from "@shopify/shopify-api";
+
+const shopify = shopifyApp({
+  api: {
+    billing: {
+      "Basic Plan": {
+        amount: 5.0,
+        currencyCode: "USD",
+        interval: BillingInterval.Every30Days,
+      },
+      "Premium Plan": {
+        amount: 10.0,
+        currencyCode: "USD",
+        interval: BillingInterval.Every30Days,
+        trialDays: 7,
+      },
+    },
+  },
+  // ... other config
+});
+```
+
+### Request Billing
+
+```typescript
+app.get(
+  "/billing/subscribe",
+  shopify.validateAuthenticatedSession(),
+  async (req, res) => {
+    const session = res.locals.shopify.session;
+    
+    const response = await shopify.api.billing.request({
+      session,
+      plan: "Premium Plan",
+      isTest: true,
+    });
+    
+    res.redirect(response.confirmationUrl);
+  }
+);
+```
+
+### Check Billing Status
+
+```typescript
+app.use(
+  shopify.validateAuthenticatedSession(),
+  async (req, res, next) => {
+    const session = res.locals.shopify.session;
+    
+    const hasActivePayment = await shopify.api.billing.check({
+      session,
+      plans: ["Basic Plan", "Premium Plan"],
+      isTest: true,
+    });
+    
+    if (!hasActivePayment) {
+      return res.redirect("/billing/subscribe");
+    }
+    
+    next();
+  }
+);
+```
+
+## Complete Example
+
+```typescript
+import express from "express";
+import { shopifyApp } from "@shopify/shopify-app-express";
+import { PostgreSQLSessionStorage } from "@shopify/shopify-app-session-storage-postgresql";
+import { ApiVersion, DeliveryMethod } from "@shopify/shopify-api";
+
+const app = express();
+
+const shopify = shopifyApp({
+  api: {
+    apiVersion: ApiVersion.January24,
+  },
+  auth: {
+    path: "/auth",
+    callbackPath: "/auth/callback",
+  },
+  webhooks: {
+    path: "/webhooks",
+  },
+  sessionStorage: new PostgreSQLSessionStorage(
+    process.env.DATABASE_URL
+  ),
+});
+
+// Add CSP headers for embedded apps
+app.use(shopify.cspHeaders());
+
+// OAuth routes
+app.get("/auth", shopify.auth.begin());
+app.get("/auth/callback", shopify.auth.callback());
+
+// Webhooks
+const webhookHandlers = {
+  APP_UNINSTALLED: async (topic, shop, body) => {
+    console.log(`App uninstalled from ${shop}`);
+  },
+};
+
+app.post(
+  "/webhooks",
+  express.text({ type: "*/*" }),
+  shopify.processWebhooks({ webhookHandlers })
+);
+
+// Ensure app is installed
+app.use("/api/*", shopify.validateAuthenticatedSession());
+
+// API routes
+app.get("/api/products", async (req, res) => {
+  const session = res.locals.shopify.session;
+  const client = new shopify.api.clients.Graphql({ session });
+  
+  const response = await client.request(
+    `query { products(first: 10) { edges { node { id title } } } }`
+  );
+  
+  const data = await response.json();
+  res.json(data.data.products);
+});
+
+// Frontend
+app.get("/", shopify.ensureInstalledOnShop(), (req, res) => {
+  res.send("<h1>My Shopify App</h1>");
+});
+
+app.listen(3000, () => {
+  console.log("App running on port 3000");
+});
+```
+
+## Helper Functions
+
+### redirectOutOfApp()
+
+Redirect users out of the Shopify Admin iframe:
+
+```typescript
+app.get("/external", (req, res) => {
+  shopify.redirectOutOfApp(req, res, "https://example.com");
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core API" icon="code" href="/app-libraries/shopify-api">
+    Learn about @shopify/shopify-api
+  </Card>
+  <Card title="Session Storage" icon="database">
+    Explore session storage options
+  </Card>
+  <Card title="Express.js Docs" icon="book" href="https://expressjs.com">
+    Express.js documentation
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/Shopify/shopify-app-js/tree/main/packages/apps/shopify-app-express">
+    View on GitHub
+  </Card>
+</CardGroup>

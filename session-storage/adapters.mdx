@@ -1,0 +1,789 @@
+---
+title: Session Storage Adapters
+description: Complete guide to all available database adapters for session storage
+---
+
+The Shopify App JavaScript SDK provides official adapters for various database systems. Each adapter implements the `SessionStorage` interface and handles connection management, serialization, and migrations automatically.
+
+## PostgreSQL
+
+Production-ready relational database adapter with automatic migrations.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-postgresql
+```
+
+### Basic Setup
+
+<CodeGroup>
+```typescript URL Connection
+import {PostgreSQLSessionStorage} from '@shopify/shopify-app-session-storage-postgresql';
+
+const sessionStorage = new PostgreSQLSessionStorage(
+  'postgres://username:password@localhost/database'
+);
+```
+
+```typescript With Credentials
+import {PostgreSQLSessionStorage} from '@shopify/shopify-app-session-storage-postgresql';
+
+const sessionStorage = PostgreSQLSessionStorage.withCredentials(
+  'localhost',        // host
+  'myshopifyapp',    // database name
+  'dbuser',          // username
+  'dbpassword',      // password
+  {}                 // options
+);
+```
+
+```typescript Custom Options
+import {PostgreSQLSessionStorage} from '@shopify/shopify-app-session-storage-postgresql';
+
+const sessionStorage = new PostgreSQLSessionStorage(
+  process.env.DATABASE_URL,
+  {
+    sessionTableName: 'custom_sessions',
+    port: 5432,
+    migratorOptions: {
+      migrationDBIdentifier: 'custom_migrations',
+      migrationNameColumnName: 'migration_name'
+    }
+  }
+);
+```
+</CodeGroup>
+
+### Configuration Options
+
+<ParamField path="sessionTableName" type="string" default="shopify_sessions">
+  Name of the table to store sessions.
+</ParamField>
+
+<ParamField path="port" type="number" default="3211">
+  PostgreSQL server port.
+</ParamField>
+
+<ParamField path="migratorOptions" type="object">
+  Migration configuration options.
+</ParamField>
+
+### Connection String Format
+
+```
+postgres://username:password@host:port/database
+postgresql://username:password@host:port/database?ssl=true
+```
+
+<Note>
+  The adapter automatically creates the sessions table and handles schema migrations.
+</Note>
+
+---
+
+## MySQL
+
+MySQL/MariaDB adapter with connection pooling support.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-mysql
+```
+
+### Basic Setup
+
+<CodeGroup>
+```typescript URL Connection
+import {MySQLSessionStorage} from '@shopify/shopify-app-session-storage-mysql';
+
+const sessionStorage = new MySQLSessionStorage(
+  'mysql://username:password@localhost/database'
+);
+```
+
+```typescript With Credentials
+import {MySQLSessionStorage} from '@shopify/shopify-app-session-storage-mysql';
+
+const sessionStorage = MySQLSessionStorage.withCredentials(
+  'localhost',        // host
+  'myshopifyapp',    // database name
+  'dbuser',          // username
+  'dbpassword',      // password
+  {}
+);
+```
+
+```typescript Connection Pool
+import {MySQLSessionStorage} from '@shopify/shopify-app-session-storage-mysql';
+
+const sessionStorage = new MySQLSessionStorage(
+  process.env.DATABASE_URL,
+  {
+    sessionTableName: 'shopify_sessions',
+    connectionPoolLimit: 20  // Increase pool size
+  }
+);
+```
+</CodeGroup>
+
+### Configuration Options
+
+<ParamField path="sessionTableName" type="string" default="shopify_sessions">
+  Name of the table to store sessions.
+</ParamField>
+
+<ParamField path="connectionPoolLimit" type="number" default="10">
+  Maximum number of connections in the pool.
+</ParamField>
+
+### Connection String Format
+
+```
+mysql://username:password@host:port/database
+mysql://username:password@host/database?connectionLimit=20
+```
+
+---
+
+## Redis
+
+High-performance in-memory session storage with automatic key prefixing.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-redis
+```
+
+### Basic Setup
+
+<CodeGroup>
+```typescript URL Connection
+import {RedisSessionStorage} from '@shopify/shopify-app-session-storage-redis';
+
+const sessionStorage = new RedisSessionStorage(
+  'redis://username:password@localhost:6379/0'
+);
+```
+
+```typescript With Credentials
+import {RedisSessionStorage} from '@shopify/shopify-app-session-storage-redis';
+
+const sessionStorage = RedisSessionStorage.withCredentials(
+  'localhost:6379',  // host
+  0,                 // database number
+  'username',
+  'password',
+  {}
+);
+```
+
+```typescript Redis Client
+import {RedisSessionStorage} from '@shopify/shopify-app-session-storage-redis';
+import {createClient} from 'redis';
+
+const redisClient = createClient({
+  url: process.env.REDIS_URL,
+  socket: {
+    tls: true,
+    rejectUnauthorized: false
+  }
+});
+
+const sessionStorage = new RedisSessionStorage(redisClient, {
+  sessionKeyPrefix: 'shopify_app'
+});
+```
+</CodeGroup>
+
+### Configuration Options
+
+<ParamField path="sessionKeyPrefix" type="string" default="shopify_sessions">
+  Prefix for all session keys in Redis.
+</ParamField>
+
+<ParamField path="migratorOptions" type="object">
+  Migration configuration.
+</ParamField>
+
+<ParamField path="onError" type="function">
+  Error handler callback.
+</ParamField>
+
+### Connection String Format
+
+```
+redis://username:password@host:port/db
+redis://:password@host:port/db
+rediss://host:port/db  # SSL/TLS connection
+```
+
+<Warning>
+  When passing a pre-configured Redis client, do not include additional options. Configure the client before passing it to the constructor.
+</Warning>
+
+---
+
+## MongoDB
+
+Flexible document-based session storage.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-mongodb
+```
+
+### Basic Setup
+
+<CodeGroup>
+```typescript URL Connection
+import {MongoDBSessionStorage} from '@shopify/shopify-app-session-storage-mongodb';
+
+const sessionStorage = new MongoDBSessionStorage(
+  new URL('mongodb://localhost:27017'),
+  'myshopifyapp',  // database name
+  {}
+);
+```
+
+```typescript With Credentials
+import {MongoDBSessionStorage} from '@shopify/shopify-app-session-storage-mongodb';
+
+const sessionStorage = MongoDBSessionStorage.withCredentials(
+  'localhost:27017',   // host
+  'myshopifyapp',     // database name
+  'dbuser',           // username
+  'dbpassword',       // password
+  {}
+);
+```
+
+```typescript Custom Collection
+import {MongoDBSessionStorage} from '@shopify/shopify-app-session-storage-mongodb';
+
+const sessionStorage = new MongoDBSessionStorage(
+  new URL(process.env.MONGODB_URL),
+  'production_db',
+  {
+    sessionCollectionName: 'app_sessions'
+  }
+);
+```
+</CodeGroup>
+
+### Configuration Options
+
+<ParamField path="sessionCollectionName" type="string" default="shopify_sessions">
+  Name of the MongoDB collection to store sessions.
+</ParamField>
+
+### Connection String Format
+
+```
+mongodb://username:password@host:port/
+mongodb://localhost:27017/
+mongodb+srv://username:password@cluster.mongodb.net/
+```
+
+<Note>
+  The database name is specified as a separate parameter, not in the connection URL.
+</Note>
+
+---
+
+## DynamoDB
+
+AWS serverless database adapter for scalable session storage.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-dynamodb
+```
+
+### Basic Setup
+
+<CodeGroup>
+```typescript Basic
+import {DynamoDBSessionStorage} from '@shopify/shopify-app-session-storage-dynamodb';
+
+const sessionStorage = new DynamoDBSessionStorage({
+  sessionTableName: 'shopify_sessions',
+  shopIndexName: 'shop_index'
+});
+```
+
+```typescript With AWS Config
+import {DynamoDBSessionStorage} from '@shopify/shopify-app-session-storage-dynamodb';
+
+const sessionStorage = new DynamoDBSessionStorage({
+  sessionTableName: 'shopify_sessions',
+  shopIndexName: 'shop_index',
+  config: {
+    region: 'us-east-1',
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    }
+  }
+});
+```
+</CodeGroup>
+
+### Configuration Options
+
+<ParamField path="sessionTableName" type="string" default="shopify_sessions">
+  Name of the DynamoDB table.
+</ParamField>
+
+<ParamField path="shopIndexName" type="string" default="shop_index">
+  Name of the Global Secondary Index on the `shop` attribute.
+</ParamField>
+
+<ParamField path="config" type="DynamoDBClientConfig">
+  AWS SDK DynamoDB client configuration.
+</ParamField>
+
+### Required Table Setup
+
+Create a DynamoDB table with:
+
+- **Partition Key:** `id` (String)
+- **Global Secondary Index:** `shop_index`
+  - **Partition Key:** `shop` (String)
+  - **Projection:** `id` and `shop` attributes
+
+<Accordion title="CloudFormation Template">
+```yaml
+Resources:
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: shopify_sessions
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: shop
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: shop_index
+          KeySchema:
+            - AttributeName: shop
+              KeyType: HASH
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - id
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+```
+</Accordion>
+
+---
+
+## SQLite
+
+Lightweight file-based database, ideal for development and small deployments.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-sqlite
+```
+
+### Basic Setup
+
+<CodeGroup>
+```typescript File Path
+import {SQLiteSessionStorage} from '@shopify/shopify-app-session-storage-sqlite';
+
+const sessionStorage = new SQLiteSessionStorage(
+  '/path/to/database.sqlite'
+);
+```
+
+```typescript In-Memory
+import {SQLiteSessionStorage} from '@shopify/shopify-app-session-storage-sqlite';
+
+const sessionStorage = new SQLiteSessionStorage(':memory:');
+```
+
+```typescript Custom Options
+import {SQLiteSessionStorage} from '@shopify/shopify-app-session-storage-sqlite';
+
+const sessionStorage = new SQLiteSessionStorage(
+  './data/sessions.db',
+  {
+    sessionTableName: 'app_sessions'
+  }
+);
+```
+</CodeGroup>
+
+### Configuration Options
+
+<ParamField path="sessionTableName" type="string" default="shopify_sessions">
+  Name of the table to store sessions.
+</ParamField>
+
+<Warning>
+  SQLite is not recommended for production apps with multiple server instances. Use a networked database instead.
+</Warning>
+
+---
+
+## Drizzle ORM
+
+Type-safe ORM adapters for PostgreSQL, MySQL, and SQLite.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-drizzle drizzle-orm
+```
+
+Install the appropriate database driver:
+
+<Tabs>
+  <Tab title="PostgreSQL">
+    ```bash
+    npm install pg
+    ```
+  </Tab>
+  <Tab title="MySQL">
+    ```bash
+    npm install mysql2
+    ```
+  </Tab>
+  <Tab title="SQLite">
+    ```bash
+    npm install better-sqlite3
+    ```
+  </Tab>
+</Tabs>
+
+### PostgreSQL Setup
+
+```typescript
+import {DrizzleSessionStoragePostgres} from '@shopify/shopify-app-session-storage-drizzle';
+import {drizzle} from 'drizzle-orm/node-postgres';
+import {pgTable, text, boolean, bigint, timestamp} from 'drizzle-orm/pg-core';
+import {Pool} from 'pg';
+
+// Define your session table schema
+const sessionTable = pgTable('session', {
+  id: text('id').primaryKey(),
+  shop: text('shop').notNull(),
+  state: text('state').notNull(),
+  isOnline: boolean('isOnline').default(false).notNull(),
+  scope: text('scope'),
+  expires: timestamp('expires', {mode: 'date'}),
+  accessToken: text('accessToken').notNull(),
+  userId: bigint('userId', {mode: 'number'}),
+  firstName: text('firstName'),
+  lastName: text('lastName'),
+  email: text('email'),
+  accountOwner: boolean('accountOwner'),
+  locale: text('locale'),
+  collaborator: boolean('collaborator'),
+  emailVerified: boolean('emailVerified'),
+  refreshToken: text('refreshToken'),
+  refreshTokenExpires: timestamp('refreshTokenExpires', {mode: 'date'}),
+});
+
+// Create database connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
+
+const db = drizzle(pool);
+
+// Create session storage
+const sessionStorage = new DrizzleSessionStoragePostgres(db, sessionTable);
+```
+
+### MySQL Setup
+
+```typescript
+import {DrizzleSessionStorageMySQL} from '@shopify/shopify-app-session-storage-drizzle';
+import {drizzle} from 'drizzle-orm/mysql2';
+import {mysqlTable, text, boolean, bigint, timestamp} from 'drizzle-orm/mysql-core';
+import mysql from 'mysql2/promise';
+
+const sessionTable = mysqlTable('session', {
+  id: text('id').primaryKey(),
+  shop: text('shop').notNull(),
+  state: text('state').notNull(),
+  isOnline: boolean('isOnline').default(false).notNull(),
+  scope: text('scope'),
+  expires: timestamp('expires', {mode: 'date'}),
+  accessToken: text('accessToken').notNull(),
+  userId: bigint('userId', {mode: 'number'}),
+  firstName: text('firstName'),
+  lastName: text('lastName'),
+  email: text('email'),
+  accountOwner: boolean('accountOwner'),
+  locale: text('locale'),
+  collaborator: boolean('collaborator'),
+  emailVerified: boolean('emailVerified'),
+  refreshToken: text('refreshToken'),
+  refreshTokenExpires: timestamp('refreshTokenExpires', {mode: 'date'}),
+});
+
+const connection = await mysql.createConnection(process.env.DATABASE_URL);
+const db = drizzle(connection);
+const sessionStorage = new DrizzleSessionStorageMySQL(db, sessionTable);
+```
+
+### SQLite Setup
+
+```typescript
+import {DrizzleSessionStorageSQLite} from '@shopify/shopify-app-session-storage-drizzle';
+import {drizzle} from 'drizzle-orm/better-sqlite3';
+import {sqliteTable, text, integer} from 'drizzle-orm/sqlite-core';
+import Database from 'better-sqlite3';
+
+const sessionTable = sqliteTable('session', {
+  id: text('id').primaryKey(),
+  shop: text('shop').notNull(),
+  state: text('state').notNull(),
+  isOnline: integer('isOnline', {mode: 'boolean'}).default(false).notNull(),
+  scope: text('scope'),
+  expires: integer('expires'),
+  accessToken: text('accessToken').notNull(),
+  userId: integer('userId'),
+  firstName: text('firstName'),
+  lastName: text('lastName'),
+  email: text('email'),
+  accountOwner: integer('accountOwner', {mode: 'boolean'}),
+  locale: text('locale'),
+  collaborator: integer('collaborator', {mode: 'boolean'}),
+  emailVerified: integer('emailVerified', {mode: 'boolean'}),
+  refreshToken: text('refreshToken'),
+  refreshTokenExpires: integer('refreshTokenExpires'),
+});
+
+const sqlite = new Database('sessions.db');
+const db = drizzle(sqlite);
+const sessionStorage = new DrizzleSessionStorageSQLite(db, sessionTable);
+```
+
+<Note>
+  You must run migrations manually when using Drizzle. The adapter does not auto-create tables.
+</Note>
+
+---
+
+## Prisma ORM
+
+Modern database toolkit with type-safety and migrations.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-prisma @prisma/client
+npm install -D prisma
+```
+
+### Setup
+
+1. **Define your Prisma schema** (`prisma/schema.prisma`):
+
+```prisma
+model Session {
+  id                   String    @id
+  shop                 String
+  state                String
+  isOnline             Boolean   @default(false)
+  scope                String?
+  expires              DateTime?
+  accessToken          String
+  userId               BigInt?
+  firstName            String?
+  lastName             String?
+  email                String?
+  accountOwner         Boolean   @default(false)
+  locale               String?
+  collaborator         Boolean   @default(false)
+  emailVerified        Boolean   @default(false)
+  refreshToken         String?
+  refreshTokenExpires  DateTime?
+}
+```
+
+2. **Generate Prisma client:**
+
+```bash
+npx prisma generate
+npx prisma migrate dev --name init
+```
+
+3. **Create session storage:**
+
+```typescript
+import {PrismaSessionStorage} from '@shopify/shopify-app-session-storage-prisma';
+import {PrismaClient} from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+const sessionStorage = new PrismaSessionStorage(prisma, {
+  tableName: 'session',  // Must match your model name
+  connectionRetries: 2,
+  connectionRetryIntervalMs: 5000
+});
+
+// Wait for storage to be ready
+if (await sessionStorage.isReady()) {
+  console.log('Session storage is ready');
+}
+```
+
+### Configuration Options
+
+<ParamField path="tableName" type="string" default="session">
+  Name of the Prisma model to use (case-sensitive).
+</ParamField>
+
+<ParamField path="connectionRetries" type="number" default="2">
+  Number of times to retry database connection.
+</ParamField>
+
+<ParamField path="connectionRetryIntervalMs" type="number" default="5000">
+  Milliseconds to wait between connection retries.
+</ParamField>
+
+<Warning>
+  The `tableName` option must exactly match your Prisma model name, including capitalization.
+</Warning>
+
+---
+
+## Cloudflare KV
+
+Edge-compatible session storage for Cloudflare Workers.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-kv
+```
+
+### Setup
+
+<CodeGroup>
+```typescript Cloudflare Worker
+import {KVSessionStorage} from '@shopify/shopify-app-session-storage-kv';
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const sessionStorage = new KVSessionStorage(env.SESSION_KV);
+    
+    // Use sessionStorage in your app
+  }
+}
+```
+
+```typescript Lazy Initialization
+import {KVSessionStorage} from '@shopify/shopify-app-session-storage-kv';
+
+// Create without namespace
+const sessionStorage = new KVSessionStorage();
+
+// Set namespace later (in request handler)
+export default {
+  async fetch(request: Request, env: Env) {
+    sessionStorage.setNamespace(env.SESSION_KV);
+  }
+}
+```
+</CodeGroup>
+
+### wrangler.toml Configuration
+
+```toml
+name = "my-shopify-app"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "SESSION_KV"
+id = "your-kv-namespace-id"
+```
+
+<Note>
+  KV storage is eventually consistent. For most session use cases, this is acceptable.
+</Note>
+
+---
+
+## Memory (Development Only)
+
+In-memory session storage for development and testing.
+
+### Installation
+
+```bash
+npm install @shopify/shopify-app-session-storage-memory
+```
+
+### Setup
+
+```typescript
+import {MemorySessionStorage} from '@shopify/shopify-app-session-storage-memory';
+
+const sessionStorage = new MemorySessionStorage();
+```
+
+<Warning>
+  **DO NOT USE IN PRODUCTION**
+  
+  - Sessions are lost when the process restarts
+  - Not shared across multiple server instances
+  - No persistence between deployments
+  - Memory usage grows indefinitely
+</Warning>
+
+### When to Use
+
+- Local development
+- Unit testing
+- Integration tests
+- Proof-of-concept apps
+
+---
+
+## Comparison Table
+
+| Adapter | Best For | Auto-Migrations | Connection Pooling | Serverless |
+|---------|----------|----------------|-------------------|------------|
+| PostgreSQL | Production apps | Yes | Yes | No |
+| MySQL | Production apps | Yes | Yes | No |
+| Redis | High-traffic apps | Yes | Yes | Yes |
+| MongoDB | Flexible schemas | No | Yes | Yes |
+| DynamoDB | AWS serverless | No | N/A | Yes |
+| SQLite | Development | Yes | No | No |
+| Drizzle | Type-safe SQL | No | Depends | Depends |
+| Prisma | Modern workflows | No | Yes | Depends |
+| KV | Cloudflare Workers | No | N/A | Yes |
+| Memory | Development only | N/A | N/A | No |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SessionStorage Interface" icon="code" href="/session-storage/session-storage-interface">
+    Learn about the core interface
+  </Card>
+  <Card title="Overview" icon="book" href="/session-storage/overview">
+    Session storage concepts
+  </Card>
+</CardGroup>

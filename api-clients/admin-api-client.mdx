@@ -1,0 +1,528 @@
+---
+title: Admin API Client
+description: Interact with Shopify's Admin API using GraphQL and REST endpoints
+---
+
+The Admin API Client provides a lightweight interface for interacting with Shopify's Admin API. It supports both GraphQL and REST endpoints with built-in authentication, retries, and type safety.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @shopify/admin-api-client
+```
+
+```bash yarn
+yarn add @shopify/admin-api-client
+```
+
+```bash pnpm
+pnpm add @shopify/admin-api-client
+```
+</CodeGroup>
+
+## GraphQL Client
+
+### Basic Setup
+
+Create a client instance with your store credentials:
+
+```typescript
+import {createAdminApiClient} from '@shopify/admin-api-client';
+
+const client = createAdminApiClient({
+  storeDomain: 'your-shop-name.myshopify.com',
+  apiVersion: '2025-01',
+  accessToken: 'your-admin-api-access-token',
+});
+```
+
+### Configuration Options
+
+<ParamField path="storeDomain" type="string" required>
+  Your shop's myshopify.com domain (e.g., `shop.myshopify.com`)
+</ParamField>
+
+<ParamField path="apiVersion" type="string" required>
+  The Admin API version to use (e.g., `2025-01`)
+</ParamField>
+
+<ParamField path="accessToken" type="string" required>
+  Admin API access token for authentication
+</ParamField>
+
+<ParamField path="userAgentPrefix" type="string">
+  Custom prefix for the User-Agent header
+</ParamField>
+
+<ParamField path="retries" type="number" default="0">
+  Number of retry attempts for failed requests (max: 3)
+</ParamField>
+
+<ParamField path="customFetchApi" type="function">
+  Custom fetch implementation for Node.js environments
+</ParamField>
+
+<ParamField path="logger" type="function">
+  Logger function for debugging and monitoring
+</ParamField>
+
+### Making GraphQL Requests
+
+#### Using `request()`
+
+The `request()` method returns a normalized response with data and errors:
+
+```typescript
+const operation = `
+  query ProductQuery($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      handle
+      description
+    }
+  }
+`;
+
+const {data, errors, extensions} = await client.request(operation, {
+  variables: {
+    id: 'gid://shopify/Product/7608002183224',
+  },
+});
+
+if (errors) {
+  console.error('Error:', errors.message);
+} else {
+  console.log('Product:', data.product.title);
+}
+```
+
+#### Using `fetch()`
+
+The `fetch()` method returns the raw Response object:
+
+```typescript
+const shopQuery = `
+  query {
+    shop {
+      name
+      email
+    }
+  }
+`;
+
+const response = await client.fetch(shopQuery);
+
+if (response.ok) {
+  const {data, errors, extensions} = await response.json();
+  console.log('Shop name:', data.shop.name);
+}
+```
+
+### Response Types
+
+#### ClientResponse
+
+The `request()` method returns a `ClientResponse` object:
+
+<ResponseField name="data" type="TData | any">
+  The GraphQL response data. Type is `TData` if provided, otherwise `any`
+</ResponseField>
+
+<ResponseField name="errors" type="ResponseErrors">
+  API or network errors (does not include UserErrors)
+</ResponseField>
+
+<ResponseField name="extensions" type="Record<string, any>">
+  Additional response metadata, including cost information
+</ResponseField>
+
+#### ResponseErrors
+
+<ResponseField name="networkStatusCode" type="number">
+  HTTP response status code
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Error message description
+</ResponseField>
+
+<ResponseField name="graphQLErrors" type="any[]">
+  Array of GraphQL errors from the API
+</ResponseField>
+
+<ResponseField name="response" type="Response">
+  Raw Response object from fetch
+</ResponseField>
+
+### Advanced Usage
+
+#### Dynamic API Versions
+
+Override the API version per request:
+
+```typescript
+const {data} = await client.request(operation, {
+  variables: {id: 'gid://shopify/Product/123'},
+  apiVersion: '2024-10',
+});
+```
+
+#### Custom Headers
+
+Add custom headers to individual requests:
+
+```typescript
+const {data} = await client.request(operation, {
+  variables: {id: 'gid://shopify/Product/123'},
+  headers: {
+    'X-GraphQL-Cost-Include-Fields': '1',
+  },
+});
+```
+
+#### Request-Level Retries
+
+Override retry count for specific requests:
+
+```typescript
+const {data} = await client.request(operation, {
+  variables: {handle: 'sample-product'},
+  retries: 2,
+});
+```
+
+### Client Methods
+
+<ResponseField name="config" type="AdminApiClientConfig">
+  Client configuration including store domain, API version, and headers
+</ResponseField>
+
+<ResponseField name="getHeaders" type="(customHeaders?) => Record<string, string>">
+  Returns merged default and custom headers
+</ResponseField>
+
+<ResponseField name="getApiUrl" type="(apiVersion?) => string">
+  Returns the GraphQL API URL for the specified version
+</ResponseField>
+
+<ResponseField name="fetch" type="(operation, options?) => Promise<Response>">
+  Makes a raw fetch request and returns the Response
+</ResponseField>
+
+<ResponseField name="request" type="<TData>(operation, options?) => Promise<ClientResponse<TData>>">
+  Makes a request and returns a normalized response object
+</ResponseField>
+
+## REST Client
+
+### Basic Setup
+
+Create a REST API client:
+
+```typescript
+import {createAdminRestApiClient} from '@shopify/admin-api-client';
+
+const client = createAdminRestApiClient({
+  storeDomain: 'your-shop-name.myshopify.com',
+  apiVersion: '2025-01',
+  accessToken: 'your-admin-api-access-token',
+});
+```
+
+### Configuration Options
+
+<ParamField path="storeDomain" type="string" required>
+  Your shop's myshopify.com domain
+</ParamField>
+
+<ParamField path="apiVersion" type="string" required>
+  The Admin API version to use
+</ParamField>
+
+<ParamField path="accessToken" type="string" required>
+  Admin API access token
+</ParamField>
+
+<ParamField path="retries" type="number" default="0">
+  Number of retry attempts (max: 3)
+</ParamField>
+
+<ParamField path="scheme" type="'http' | 'https'" default="'https'">
+  HTTP scheme for requests
+</ParamField>
+
+<ParamField path="formatPaths" type="boolean" default="true">
+  Auto-format paths (e.g., `products/123` → `/admin/api/2025-01/products/123.json`)
+</ParamField>
+
+### Making REST Requests
+
+<Tabs>
+  <Tab title="GET">
+    ```typescript
+    const response = await client.get('products/1234567890');
+
+    if (response.ok) {
+      const body = await response.json();
+      console.log('Product:', body.product);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="POST">
+    ```typescript
+    const response = await client.post('products', {
+      data: {
+        product: {
+          title: 'New Product',
+          product_type: 'Shoes',
+        },
+      },
+    });
+
+    if (response.ok) {
+      const body = await response.json();
+      console.log('Created:', body.product.id);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="PUT">
+    ```typescript
+    const response = await client.put('products/1234567890', {
+      data: {
+        product: {
+          title: 'Updated Title',
+        },
+      },
+    });
+
+    if (response.ok) {
+      const body = await response.json();
+      console.log('Updated:', body.product);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="DELETE">
+    ```typescript
+    const response = await client.delete('products/1234567890');
+
+    if (response.ok) {
+      console.log('Product deleted');
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Query Parameters
+
+Add query parameters using the `searchParams` option:
+
+```typescript
+const response = await client.get('products', {
+  searchParams: {
+    limit: 10,
+    status: 'active',
+    fields: ['id', 'title', 'handle'],
+  },
+});
+```
+
+Arrays and objects are automatically formatted:
+
+```typescript
+// Becomes: ?array[]=a&array[]=b&hash[key]=value
+searchParams: {
+  array: ['a', 'b'],
+  hash: {key: 'value'},
+}
+```
+
+### Custom Headers
+
+Add custom headers to REST requests:
+
+```typescript
+const response = await client.get('products/123', {
+  headers: {
+    'X-Custom-Header': 'value',
+  },
+});
+```
+
+## Type Safety
+
+Use the API Codegen Preset to generate TypeScript types:
+
+<Steps>
+  <Step title="Install codegen preset">
+    ```bash
+    npm install --save-dev @shopify/api-codegen-preset
+    ```
+  </Step>
+  
+  <Step title="Create .graphqlrc.ts">
+    ```typescript
+    import {ApiType, shopifyApiProject} from '@shopify/api-codegen-preset';
+
+    export default {
+      schema: 'https://shopify.dev/admin-graphql-direct-proxy',
+      documents: ['*.ts', '!node_modules'],
+      projects: {
+        default: shopifyApiProject({
+          apiType: ApiType.Admin,
+          apiVersion: '2025-01',
+          outputDir: './types',
+        }),
+      },
+    };
+    ```
+  </Step>
+  
+  <Step title="Tag your queries">
+    ```typescript
+    const {data} = await client.request<ShopQuery>(
+      `#graphql
+      query Shop {
+        shop {
+          name
+          email
+        }
+      }`,
+    );
+    
+    // data.shop is fully typed
+    console.log(data?.shop.name);
+    ```
+  </Step>
+  
+  <Step title="Run codegen">
+    ```bash
+    npm run graphql-codegen
+    ```
+  </Step>
+</Steps>
+
+## Error Handling
+
+### GraphQL Errors
+
+```typescript
+const {data, errors} = await client.request(operation);
+
+if (errors) {
+  if (errors.networkStatusCode === 401) {
+    console.error('Unauthorized');
+  } else if (errors.graphQLErrors) {
+    errors.graphQLErrors.forEach((error) => {
+      console.error(`Field error: ${error.message}`);
+      console.error(`Path: ${error.path}`);
+    });
+  }
+}
+```
+
+### REST Errors
+
+```typescript
+const response = await client.get('products/invalid');
+
+if (!response.ok) {
+  const error = await response.json();
+  console.error('Error:', error.errors);
+}
+```
+
+## Logging
+
+Monitor requests and retries with a custom logger:
+
+```typescript
+const client = createAdminApiClient({
+  storeDomain: 'shop.myshopify.com',
+  apiVersion: '2025-01',
+  accessToken: 'token',
+  logger: (log) => {
+    if (log.type === 'HTTP-Response') {
+      console.log('Response received:', log.content.response.status);
+    } else if (log.type === 'HTTP-Retry') {
+      console.log(`Retry ${log.content.retryAttempt}/${log.content.maxRetries}`);
+    }
+  },
+});
+```
+
+### Log Types
+
+<ResponseField name="HTTP-Response" type="HTTPResponseLog">
+  Sent when an HTTP response is received
+  
+  ```typescript
+  {
+    type: 'HTTP-Response',
+    content: {
+      requestParams: [url, init],
+      response: Response
+    }
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="HTTP-Retry" type="HTTPRetryLog">
+  Sent when the client retries a request
+  
+  ```typescript
+  {
+    type: 'HTTP-Retry',
+    content: {
+      requestParams: [url, init],
+      lastResponse: Response,
+      retryAttempt: number,
+      maxRetries: number
+    }
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="Unsupported_Api_Version" type="UnsupportedApiVersionLog">
+  Sent when an unsupported API version is used
+  
+  ```typescript
+  {
+    type: 'Unsupported_Api_Version',
+    content: {
+      apiVersion: string,
+      supportedApiVersions: string[]
+    }
+  }
+  ```
+</ResponseField>
+
+## Best Practices
+
+<Note>
+**Server-Side Only**: The Admin API client should only be used in server-side environments. Never expose your Admin API access token in client-side code.
+</Note>
+
+<Warning>
+**Rate Limiting**: The Admin API has rate limits. Use the `retries` option and monitor the `extensions.cost` field in responses to manage your request quota.
+</Warning>
+
+<Tip>
+**Use GraphQL**: For most use cases, prefer the GraphQL API over REST. It's more efficient and provides better type safety with codegen.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Codegen Preset" icon="wand-magic-sparkles" href="/api-clients/api-codegen-preset">
+    Generate TypeScript types for your queries
+  </Card>
+  
+  <Card title="Admin API Reference" icon="book" href="https://shopify.dev/docs/api/admin-graphql">
+    Explore the Admin API schema
+  </Card>
+</CardGroup>

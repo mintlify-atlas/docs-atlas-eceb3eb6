@@ -1,0 +1,251 @@
+---
+title: API Clients Overview
+description: Learn about Shopify's JavaScript API client packages for interacting with Admin and Storefront APIs
+---
+
+Shopify provides a suite of lightweight JavaScript API client packages designed to help you interact with Shopify's GraphQL and REST APIs. These packages are minimally opinionated and provide essential functionality for authentication, request handling, and type safety.
+
+## Available Packages
+
+The API clients ecosystem consists of the following packages:
+
+<CardGroup cols={2}>
+  <Card title="Admin API Client" icon="gear" href="/api-clients/admin-api-client">
+    Client for Shopify's Admin API with GraphQL and REST support
+  </Card>
+  
+  <Card title="Storefront API Client" icon="store" href="/api-clients/storefront-api-client">
+    Client for Shopify's Storefront API with streaming support
+  </Card>
+  
+  <Card title="GraphQL Client" icon="code" href="/api-clients/graphql-client">
+    Generic GraphQL client for any Shopify GraphQL API
+  </Card>
+  
+  <Card title="API Codegen Preset" icon="wand-magic-sparkles" href="/api-clients/api-codegen-preset">
+    TypeScript type generation for GraphQL operations
+  </Card>
+</CardGroup>
+
+## Architecture
+
+The API clients follow a layered architecture:
+
+```
+┌─────────────────────────────────────────┐
+│  Admin API Client / Storefront Client   │
+│  (Domain-specific functionality)         │
+└─────────────────┬───────────────────────┘
+                  │
+┌─────────────────▼───────────────────────┐
+│        GraphQL Client                   │
+│  (Core GraphQL functionality)            │
+└─────────────────┬───────────────────────┘
+                  │
+┌─────────────────▼───────────────────────┐
+│     Fetch API (Browser/Node.js)         │
+└─────────────────────────────────────────┘
+```
+
+- **GraphQL Client**: Core client handling GraphQL requests, retries, and streaming
+- **Admin/Storefront Clients**: Domain-specific clients with API versioning, authentication headers, and URL formatting
+- **API Codegen Preset**: Development tool for generating TypeScript types from your GraphQL operations
+
+## Key Features
+
+### Type Safety
+
+All clients support TypeScript and can be enhanced with auto-generated types using the API Codegen Preset:
+
+```typescript
+const {data, errors} = await client.request<ProductQuery>(
+  operation,
+  {variables: {id: 'gid://shopify/Product/123'}}
+);
+
+// data.product is fully typed
+console.log(data?.product.title);
+```
+
+### Automatic Retries
+
+Built-in retry logic for failed requests with configurable retry counts:
+
+```typescript
+const client = createAdminApiClient({
+  storeDomain: 'shop.myshopify.com',
+  apiVersion: '2025-01',
+  accessToken: 'token',
+  retries: 2, // Retry up to 2 times on 429/503 errors
+});
+```
+
+### Flexible Authentication
+
+Support for different authentication methods depending on the API:
+
+- **Admin API**: Access tokens via `X-Shopify-Access-Token` header
+- **Storefront API**: Public or private access tokens
+- **Custom**: Provide your own headers for any API
+
+### Stream Support
+
+Storefront and GraphQL clients support streaming responses for operations using the `@defer` directive:
+
+```typescript
+const stream = await client.requestStream(deferredQuery, {variables});
+
+for await (const response of stream) {
+  console.log(response.data); // Partial data as it arrives
+  if (!response.hasNext) break;
+}
+```
+
+### Custom Fetch API
+
+All clients support custom fetch implementations for Node.js or custom networking:
+
+```typescript
+import {fetch as nodeFetch} from 'node-fetch';
+
+const client = createAdminApiClient({
+  // ... other config
+  customFetchApi: nodeFetch,
+});
+```
+
+## Installation
+
+Install the package you need using your preferred package manager:
+
+<CodeGroup>
+```bash npm
+npm install @shopify/admin-api-client
+```
+
+```bash yarn
+yarn add @shopify/admin-api-client
+```
+
+```bash pnpm
+pnpm add @shopify/admin-api-client
+```
+</CodeGroup>
+
+## Quick Start
+
+<Tabs>
+  <Tab title="Admin API">
+    ```typescript
+    import {createAdminApiClient} from '@shopify/admin-api-client';
+
+    const client = createAdminApiClient({
+      storeDomain: 'your-shop.myshopify.com',
+      apiVersion: '2025-01',
+      accessToken: 'your-access-token',
+    });
+
+    const {data, errors} = await client.request(`
+      query {
+        shop {
+          name
+        }
+      }
+    `);
+    ```
+  </Tab>
+  
+  <Tab title="Storefront API">
+    ```typescript
+    import {createStorefrontApiClient} from '@shopify/storefront-api-client';
+
+    const client = createStorefrontApiClient({
+      storeDomain: 'your-shop.myshopify.com',
+      apiVersion: '2025-01',
+      publicAccessToken: 'your-public-token',
+    });
+
+    const {data, errors} = await client.request(`
+      query {
+        shop {
+          name
+        }
+      }
+    `);
+    ```
+  </Tab>
+</Tabs>
+
+## Common Patterns
+
+### Error Handling
+
+All clients return a consistent error structure:
+
+```typescript
+const {data, errors} = await client.request(operation);
+
+if (errors) {
+  console.error('Network error:', errors.message);
+  console.error('Status code:', errors.networkStatusCode);
+  
+  if (errors.graphQLErrors) {
+    console.error('GraphQL errors:', errors.graphQLErrors);
+  }
+} else {
+  // Use data safely
+  console.log(data);
+}
+```
+
+### API Versioning
+
+You can override the API version per request:
+
+```typescript
+const client = createAdminApiClient({
+  storeDomain: 'shop.myshopify.com',
+  apiVersion: '2025-01',
+  accessToken: 'token',
+});
+
+// Use a different version for this request
+const {data} = await client.request(operation, {
+  apiVersion: '2024-10',
+});
+```
+
+### Logging
+
+All clients support custom loggers for debugging:
+
+```typescript
+const client = createAdminApiClient({
+  storeDomain: 'shop.myshopify.com',
+  apiVersion: '2025-01',
+  accessToken: 'token',
+  logger: (logContent) => {
+    console.log(logContent.type, logContent.content);
+  },
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Admin API Client" icon="gear" href="/api-clients/admin-api-client">
+    Learn about GraphQL and REST endpoints for the Admin API
+  </Card>
+  
+  <Card title="Storefront API Client" icon="store" href="/api-clients/storefront-api-client">
+    Build customer-facing storefronts with the Storefront API
+  </Card>
+  
+  <Card title="Type Generation" icon="wand-magic-sparkles" href="/api-clients/api-codegen-preset">
+    Auto-generate TypeScript types for your operations
+  </Card>
+  
+  <Card title="GraphQL Client" icon="code" href="/api-clients/graphql-client">
+    Use the low-level GraphQL client for custom APIs
+  </Card>
+</CardGroup>

@@ -1,0 +1,265 @@
+---
+title: Storefront API client
+description: API reference for the Storefront API client
+---
+
+## createStorefrontApiClient()
+
+Creates a GraphQL client for the Shopify Storefront API.
+
+```typescript
+import { createStorefrontApiClient } from '@shopify/storefront-api-client';
+
+const client = createStorefrontApiClient({
+  storeDomain: 'your-store.myshopify.com',
+  apiVersion: '2024-01',
+  publicAccessToken: 'your-public-token',
+});
+```
+
+### Parameters
+
+<ParamField path="storeDomain" type="string" required>
+  Your Shopify store domain (e.g., `'your-store.myshopify.com'`)
+</ParamField>
+
+<ParamField path="apiVersion" type="string" required>
+  Storefront API version (e.g., `'2024-01'`)
+</ParamField>
+
+<ParamField path="publicAccessToken" type="string">
+  Public access token for public storefront access. Either `publicAccessToken` or `privateAccessToken` is required.
+</ParamField>
+
+<ParamField path="privateAccessToken" type="string">
+  Private access token for server-side access. Either `publicAccessToken` or `privateAccessToken` is required.
+  
+  <Warning>Private tokens should never be exposed to client-side code</Warning>
+</ParamField>
+
+<ParamField path="clientName" type="string">
+  Optional client identifier included in request headers
+</ParamField>
+
+<ParamField path="retries" type="number" default="0">
+  Number of retry attempts for failed requests
+</ParamField>
+
+<ParamField path="customFetchApi" type="CustomFetchApi">
+  Custom fetch implementation (useful for Node.js environments)
+</ParamField>
+
+<ParamField path="logger" type="ApiClientLogger">
+  Custom logger for request/response logging
+</ParamField>
+
+### Return Value
+
+Returns a `StorefrontApiClient` object with the following properties:
+
+<ResponseField name="config" type="StorefrontApiClientConfig">
+  The client configuration
+  
+  <Expandable title="properties">
+    <ResponseField name="storeDomain" type="string">
+      Store URL
+    </ResponseField>
+    
+    <ResponseField name="apiVersion" type="string">
+      API version
+    </ResponseField>
+    
+    <ResponseField name="publicAccessToken" type="string | undefined">
+      Public access token (if using public access)
+    </ResponseField>
+    
+    <ResponseField name="privateAccessToken" type="string | undefined">
+      Private access token (if using private access)
+    </ResponseField>
+    
+    <ResponseField name="headers" type="Record<string, string>">
+      Default request headers
+    </ResponseField>
+    
+    <ResponseField name="apiUrl" type="string">
+      Full API endpoint URL
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="request()" type="function">
+  Make a GraphQL request and return the data
+  
+  ```typescript
+  const { data, errors, extensions } = await client.request(query, {
+    variables: { id: 'gid://shopify/Product/123' }
+  });
+  ```
+</ResponseField>
+
+<ResponseField name="fetch()" type="function">
+  Make a GraphQL request and return the raw response
+  
+  ```typescript
+  const response = await client.fetch(query, {
+    variables: { id: 'gid://shopify/Product/123' }
+  });
+  ```
+</ResponseField>
+
+<ResponseField name="requestStream()" type="function">
+  Make a streaming GraphQL request (for `@defer` directive)
+  
+  ```typescript
+  const stream = client.requestStream(query);
+  for await (const chunk of stream) {
+    console.log(chunk.data);
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="getHeaders()" type="function">
+  Get the current request headers
+  
+  ```typescript
+  const headers = client.getHeaders();
+  ```
+</ResponseField>
+
+<ResponseField name="getApiUrl()" type="function">
+  Get the API URL, optionally for a different API version
+  
+  ```typescript
+  const url = client.getApiUrl('2024-04');
+  ```
+</ResponseField>
+
+## Usage Examples
+
+### Public Access (Client-Side)
+
+Use public access tokens for client-side applications:
+
+```typescript
+const client = createStorefrontApiClient({
+  storeDomain: 'your-store.myshopify.com',
+  apiVersion: '2024-01',
+  publicAccessToken: 'your-public-token',
+});
+
+const PRODUCT_QUERY = `
+  query GetProduct($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      description
+      priceRange {
+        minVariantPrice {
+          amount
+          currencyCode
+        }
+      }
+    }
+  }
+`;
+
+const { data } = await client.request(PRODUCT_QUERY, {
+  variables: { id: 'gid://shopify/Product/123' }
+});
+```
+
+### Private Access (Server-Side)
+
+Use private access tokens for server-side operations:
+
+```typescript
+const client = createStorefrontApiClient({
+  storeDomain: 'your-store.myshopify.com',
+  apiVersion: '2024-01',
+  privateAccessToken: process.env.STOREFRONT_PRIVATE_TOKEN!,
+  customFetchApi: fetch, // Required in Node.js < 18
+});
+
+const CART_CREATE_MUTATION = `
+  mutation CreateCart($input: CartInput!) {
+    cartCreate(input: $input) {
+      cart {
+        id
+        checkoutUrl
+      }
+    }
+  }
+`;
+
+const { data } = await client.request(CART_CREATE_MUTATION, {
+  variables: {
+    input: {
+      lines: [
+        { merchandiseId: 'gid://shopify/ProductVariant/123', quantity: 1 }
+      ]
+    }
+  }
+});
+```
+
+### Streaming Responses with @defer
+
+```typescript
+const DEFERRED_QUERY = `
+  query GetProducts {
+    products(first: 10) {
+      edges {
+        node {
+          id
+          title
+          ... @defer {
+            description
+            images(first: 5) {
+              edges {
+                node {
+                  url
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const stream = client.requestStream(DEFERRED_QUERY);
+
+for await (const response of stream) {
+  console.log('Received chunk:', response.data);
+}
+```
+
+### With TypeScript Codegen
+
+For full type safety, use with `@shopify/api-codegen-preset`:
+
+```typescript
+import { createStorefrontApiClient } from '@shopify/storefront-api-client';
+import type { GetProductQuery, GetProductQueryVariables } from './storefrontTypes';
+
+const client = createStorefrontApiClient({
+  storeDomain: 'your-store.myshopify.com',
+  apiVersion: '2024-01',
+  publicAccessToken: 'your-public-token',
+});
+
+const { data } = await client.request<GetProductQuery, GetProductQueryVariables>(
+  PRODUCT_QUERY,
+  { variables: { id: 'gid://shopify/Product/123' } }
+);
+
+// data is fully typed!
+console.log(data?.product?.title);
+```
+
+## Related
+
+- [Storefront API Client Guide](/api-clients/storefront-api-client)
+- [GraphQL Client Reference](/api-reference/graphql-client)
+- [API Codegen Preset](/api-clients/api-codegen-preset)

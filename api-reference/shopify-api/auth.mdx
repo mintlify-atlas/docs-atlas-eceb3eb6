@@ -1,0 +1,498 @@
+---
+title: 'Auth API'
+description: 'Authentication methods for OAuth, token exchange, and session management'
+---
+
+## Overview
+
+The `auth` API provides methods for authenticating your Shopify app using OAuth, token exchange, and various token management flows.
+
+Access the auth API through your configured Shopify instance:
+
+```typescript
+const shopify = shopifyApi({ /* config */ });
+const auth = shopify.auth;
+```
+
+## begin()
+
+Initiates the OAuth authorization flow by redirecting the merchant to Shopify's authorization page.
+
+### Signature
+
+```typescript
+type OAuthBegin = (beginParams: BeginParams) => Promise<AdapterResponse>;
+```
+
+### Parameters
+
+<ParamField path="shop" type="string" required>
+  The shop domain. For example: `exampleshop.myshopify.com`.
+</ParamField>
+
+<ParamField path="callbackPath" type="string" required>
+  The path to the callback endpoint, with a leading `/`.
+  
+  This URL must be allowed in the Partners dashboard, or using the CLI to run your app.
+</ParamField>
+
+<ParamField path="isOnline" type="boolean" required>
+  Defines if the session is online or offline.
+  
+  Learn more about [OAuth access modes](https://shopify.dev/docs/apps/auth/oauth/access-modes).
+</ParamField>
+
+### Returns
+
+Returns a `Promise<AdapterResponse>` that resolves to an HTTP redirect response (status 302) to Shopify's OAuth authorization page.
+
+### Example
+
+<CodeGroup>
+```typescript Express
+app.get('/auth', async (req, res) => {
+  const shop = req.query.shop as string;
+  
+  const response = await shopify.auth.begin({
+    shop,
+    callbackPath: '/auth/callback',
+    isOnline: false,
+    rawRequest: req,
+    rawResponse: res,
+  });
+  
+  // Response headers and status are set automatically
+});
+```
+
+```typescript Node HTTP
+import http from 'http';
+
+const server = http.createServer(async (req, res) => {
+  if (req.url?.startsWith('/auth')) {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const shop = url.searchParams.get('shop');
+    
+    await shopify.auth.begin({
+      shop,
+      callbackPath: '/auth/callback',
+      isOnline: false,
+      rawRequest: req,
+      rawResponse: res,
+    });
+  }
+});
+```
+</CodeGroup>
+
+### Notes
+
+<Note>
+  This function sets a secure, signed cookie containing the OAuth state parameter for CSRF protection.
+</Note>
+
+<Note>
+  Cannot be used with custom store apps (`isCustomStoreApp: true`). Will throw `PrivateAppError`.
+</Note>
+
+## callback()
+
+Completes the OAuth authorization flow by exchanging the authorization code for an access token.
+
+### Signature
+
+```typescript
+type OAuthCallback = <T = AdapterHeaders>(
+  callbackParams: CallbackParams,
+) => Promise<CallbackResponse<T>>;
+```
+
+### Parameters
+
+<ParamField path="expiring" type="boolean" default="false">
+  Whether the access token should be expiring.
+  
+  Learn more about [Expiring Access Tokens](https://shopify.dev/docs/apps/auth/oauth/access-modes#expiring-access-tokens).
+</ParamField>
+
+### Returns
+
+Returns a `Promise<CallbackResponse>` with:
+
+<ResponseField name="headers" type="AdapterHeaders">
+  Response headers (includes Set-Cookie for non-embedded apps).
+</ResponseField>
+
+<ResponseField name="session" type="Session">
+  The created session object containing:
+  - `id` - Session ID
+  - `shop` - Shop domain
+  - `state` - OAuth state
+  - `accessToken` - Access token
+  - `scope` - Granted scopes
+  - `expires` - Expiration date (for online sessions)
+  - `isOnline` - Whether this is an online session
+  - `onlineAccessInfo` - Online access info (if online session)
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+```typescript Express
+app.get('/auth/callback', async (req, res) => {
+  try {
+    const { session, headers } = await shopify.auth.callback({
+      rawRequest: req,
+      rawResponse: res,
+    });
+    
+    // Store session in your database
+    await SessionStorage.storeSession(session);
+    
+    // Set response headers
+    Object.entries(headers).forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
+    
+    // Redirect to app
+    res.redirect('/');
+  } catch (error) {
+    console.error('OAuth callback error:', error);
+    res.status(500).send('Authentication failed');
+  }
+});
+```
+
+```typescript With Expiring Tokens
+const { session, headers } = await shopify.auth.callback({
+  expiring: true, // Request expiring access tokens
+  rawRequest: req,
+  rawResponse: res,
+});
+
+// Session will include expires, refreshToken, etc.
+console.log('Token expires at:', session.expires);
+console.log('Refresh token:', session.refreshToken);
+```
+</CodeGroup>
+
+### Errors
+
+Throws the following errors:
+
+- `CookieNotFound` - OAuth state cookie not found
+- `InvalidOAuthError` - Invalid OAuth callback (HMAC validation failed)
+- `BotActivityDetected` - Request initiated by a bot
+
+## tokenExchange()
+
+Exchanges a session token for an access token. Recommended for embedded apps using App Bridge.
+
+### Signature
+
+```typescript
+type TokenExchange = (
+  params: TokenExchangeParams,
+) => Promise<{session: Session}>;
+```
+
+### Parameters
+
+<ParamField path="shop" type="string" required>
+  The shop domain.
+</ParamField>
+
+<ParamField path="sessionToken" type="string" required>
+  The session token from Shopify App Bridge.
+</ParamField>
+
+<ParamField path="requestedTokenType" type="RequestedTokenType" required>
+  The type of token to request:
+  - `RequestedTokenType.OnlineAccessToken` - Online access token
+  - `RequestedTokenType.OfflineAccessToken` - Offline access token
+</ParamField>
+
+<ParamField path="expiring" type="boolean" default="false">
+  Whether the access token should be expiring.
+</ParamField>
+
+### Returns
+
+<ResponseField name="session" type="Session">
+  The created session object.
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+```typescript Express Middleware
+import { RequestedTokenType } from '@shopify/shopify-api';
+
+app.post('/api/session', async (req, res) => {
+  const sessionToken = req.headers.authorization?.replace('Bearer ', '');
+  const shop = req.body.shop;
+  
+  try {
+    const { session } = await shopify.auth.tokenExchange({
+      shop,
+      sessionToken,
+      requestedTokenType: RequestedTokenType.OnlineAccessToken,
+    });
+    
+    await SessionStorage.storeSession(session);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(401).json({ error: 'Token exchange failed' });
+  }
+});
+```
+
+```typescript With App Bridge
+// Frontend (App Bridge)
+import { getSessionToken } from '@shopify/app-bridge/utilities';
+
+const app = createApp({
+  apiKey: 'your-api-key',
+  host: hostFromQuery,
+});
+
+const sessionToken = await getSessionToken(app);
+
+// Send to backend
+fetch('/api/session', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${sessionToken}`,
+  },
+  body: JSON.stringify({ shop }),
+});
+```
+</CodeGroup>
+
+## clientCredentials()
+
+Obtains an access token using the client credentials flow. Used for admin-level API access.
+
+### Signature
+
+```typescript
+type ClientCredentials = (
+  params: ClientCredentialsParams,
+) => Promise<{session: Session}>;
+```
+
+### Parameters
+
+<ParamField path="shop" type="string" required>
+  The shop domain.
+</ParamField>
+
+### Returns
+
+<ResponseField name="session" type="Session">
+  The created session object with admin-level access.
+</ResponseField>
+
+### Example
+
+```typescript
+const { session } = await shopify.auth.clientCredentials({
+  shop: 'example.myshopify.com',
+});
+
+// Use session for admin API calls
+const client = new shopify.clients.Graphql({ session });
+```
+
+## refreshToken()
+
+Refreshes an expired access token using a refresh token.
+
+### Signature
+
+```typescript
+type RefreshToken = (
+  params: RefreshTokenParams,
+) => Promise<{session: Session}>;
+```
+
+### Parameters
+
+<ParamField path="shop" type="string" required>
+  The shop domain.
+</ParamField>
+
+<ParamField path="refreshToken" type="string" required>
+  The refresh token from the previous session.
+</ParamField>
+
+### Returns
+
+<ResponseField name="session" type="Session">
+  A new session object with a fresh access token.
+</ResponseField>
+
+### Example
+
+```typescript
+try {
+  // Try to use existing session
+  const response = await client.query({ data: query });
+} catch (error) {
+  if (error.response?.status === 401) {
+    // Token expired, refresh it
+    const { session: newSession } = await shopify.auth.refreshToken({
+      shop: session.shop,
+      refreshToken: session.refreshToken,
+    });
+    
+    // Store new session
+    await SessionStorage.storeSession(newSession);
+    
+    // Retry request with new session
+    const client = new shopify.clients.Graphql({ session: newSession });
+    const response = await client.query({ data: query });
+  }
+}
+```
+
+## migrateToExpiringToken()
+
+Migrates a non-expiring access token to an expiring token.
+
+### Signature
+
+```typescript
+type MigrateToExpiringToken = (
+  params: MigrateToExpiringTokenParams,
+) => Promise<{session: Session}>;
+```
+
+### Example
+
+```typescript
+const { session: newSession } = await shopify.auth.migrateToExpiringToken({
+  shop: 'example.myshopify.com',
+  accessToken: 'existing-non-expiring-token',
+});
+
+// newSession now has expiring token with refresh token
+```
+
+## Utility Functions
+
+### nonce()
+
+Generates a cryptographically secure random nonce.
+
+```typescript
+type Nonce = () => string;
+```
+
+**Example:**
+```typescript
+const state = shopify.auth.nonce();
+// Returns: 'a1b2c3d4e5f6...'
+```
+
+### safeCompare()
+
+Performs constant-time string comparison to prevent timing attacks.
+
+```typescript
+type SafeCompare = (strA: string, strB: string) => boolean;
+```
+
+**Example:**
+```typescript
+const isValid = shopify.auth.safeCompare(
+  receivedHmac,
+  calculatedHmac
+);
+```
+
+### getEmbeddedAppUrl()
+
+Gets the embedded app URL for the current request.
+
+```typescript
+type GetEmbeddedAppUrl = (params: AdapterArgs) => Promise<string>;
+```
+
+**Example:**
+```typescript
+const embeddedUrl = await shopify.auth.getEmbeddedAppUrl({
+  rawRequest: req,
+  rawResponse: res,
+});
+```
+
+### buildEmbeddedAppUrl()
+
+Builds an embedded app URL from components.
+
+```typescript
+type BuildEmbeddedAppUrl = (params: BuildEmbeddedAppUrlParams) => string;
+```
+
+**Example:**
+```typescript
+const embeddedUrl = shopify.auth.buildEmbeddedAppUrl({
+  host: 'encoded-host-parameter',
+  path: '/products',
+});
+```
+
+## Types
+
+### RequestedTokenType
+
+```typescript
+enum RequestedTokenType {
+  OnlineAccessToken = 'urn:shopify:params:oauth:token-type:online-access-token',
+  OfflineAccessToken = 'urn:shopify:params:oauth:token-type:offline-access-token',
+}
+```
+
+### OnlineAccessInfo
+
+```typescript
+interface OnlineAccessInfo {
+  expires_in: number;
+  associated_user_scope: string;
+  associated_user: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    email: string;
+    email_verified: boolean;
+    account_owner: boolean;
+    locale: string;
+    collaborator: boolean;
+  };
+}
+```
+
+### OfflineAccessInfo
+
+```typescript
+interface OfflineAccessInfo {
+  expires_in?: number;
+  refresh_token?: string;
+  refresh_token_expires_in?: number;
+}
+```
+
+## Notes
+
+<Note>
+  For embedded apps, use `tokenExchange()` instead of the traditional OAuth flow for better user experience.
+</Note>
+
+<Note>
+  Always store sessions securely in your database. Never expose access tokens to the frontend.
+</Note>
+
+<Note>
+  Use offline access tokens for background jobs and webhooks. Use online access tokens for user-specific operations.
+</Note>

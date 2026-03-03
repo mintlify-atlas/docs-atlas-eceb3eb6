@@ -1,0 +1,421 @@
+---
+title: REST Resources
+description: Learn how to use REST resources to interact with the Shopify Admin API
+---
+
+This guide covers using REST resources to interact with the Shopify Admin API.
+
+## Overview
+
+REST resources provide an object-oriented interface for working with Shopify REST API endpoints. Each resource represents a Shopify object (Product, Order, Customer, etc.).
+
+## Creating a REST Client
+
+Create a REST client using a session:
+
+```typescript
+const client = new shopify.clients.Rest({session});
+```
+
+Optionally override the API version:
+
+```typescript
+const client = new shopify.clients.Rest({
+  session,
+  apiVersion: '2024-01',
+});
+```
+
+Source: `lib/clients/admin/rest/client.ts:65-102`
+
+## Making REST Requests
+
+The REST client provides methods for all HTTP verbs:
+
+<Tabs>
+  <Tab title="GET">
+    ```typescript
+    const response = await client.get({
+      path: 'products',
+      query: {
+        limit: 10,
+        status: 'active',
+      },
+    });
+
+    console.log(response.body.products);
+    ```
+
+    Source: `lib/clients/admin/rest/client.ts:107-109`
+  </Tab>
+
+  <Tab title="POST">
+    ```typescript
+    const response = await client.post({
+      path: 'products',
+      data: {
+        product: {
+          title: 'New Product',
+          body_html: '<p>Description</p>',
+          vendor: 'My Store',
+        },
+      },
+      type: 'application/json',
+    });
+
+    console.log(response.body.product);
+    ```
+
+    Source: `lib/clients/admin/rest/client.ts:114-116`
+  </Tab>
+
+  <Tab title="PUT">
+    ```typescript
+    const response = await client.put({
+      path: 'products/1234567890',
+      data: {
+        product: {
+          id: 1234567890,
+          title: 'Updated Title',
+        },
+      },
+      type: 'application/json',
+    });
+    ```
+
+    Source: `lib/clients/admin/rest/client.ts:121-123`
+  </Tab>
+
+  <Tab title="DELETE">
+    ```typescript
+    const response = await client.delete({
+      path: 'products/1234567890',
+    });
+
+    console.log('Product deleted');
+    ```
+
+    Source: `lib/clients/admin/rest/client.ts:128-130`
+  </Tab>
+</Tabs>
+
+## Request Parameters
+
+```typescript
+interface RequestParams {
+  path: string;                    // API endpoint path
+  query?: Record<string, any>;     // Query parameters
+  data?: any;                      // Request body (POST/PUT)
+  type?: string;                   // Content-Type header
+  extraHeaders?: Record<string, string>; // Additional headers
+  tries?: number;                  // Retry attempts
+}
+```
+
+## Response Structure
+
+```typescript
+interface RestRequestReturn<T> {
+  body: T;                         // Response body
+  headers: Headers;                // Response headers
+  pageInfo?: PageInfo;             // Pagination info (if applicable)
+}
+
+interface PageInfo {
+  limit: string;                   // Items per page
+  fields?: string[];               // Fields returned
+  nextPage?: {                     // Next page params
+    path: string;
+    query: Record<string, any>;
+  };
+  prevPage?: {                     // Previous page params
+    path: string;
+    query: Record<string, any>;
+  };
+  nextPageUrl?: string;            // Next page URL
+  previousPageUrl?: string;        // Previous page URL
+}
+```
+
+Source: `lib/clients/admin/rest/client.ts:186-246`
+
+## Pagination
+
+REST API uses cursor-based pagination via Link headers:
+
+```typescript
+let allProducts = [];
+let nextPage = {path: 'products', query: {limit: 50}};
+
+while (nextPage) {
+  const response = await client.get(nextPage);
+  
+  allProducts.push(...response.body.products);
+  
+  // Get next page parameters
+  nextPage = response.pageInfo?.nextPage;
+}
+
+console.log(`Fetched ${allProducts.length} products`);
+```
+
+Source: `lib/clients/admin/rest/client.ts:201-243`
+
+## Working with Resources
+
+While you can use the REST client directly, REST resources provide a more convenient interface.
+
+### Loading Resources
+
+Load REST resources when creating the API instance:
+
+```typescript
+import {shopifyApi} from '@shopify/shopify-api';
+import '@shopify/shopify-api/adapters/node';
+import {restResources} from '@shopify/shopify-api/rest/admin/2024-01';
+
+const shopify = shopifyApi({
+  // ... config
+  restResources,
+});
+```
+
+### Using Resources
+
+Resources provide static methods for CRUD operations:
+
+```typescript
+// Find a product
+const product = await shopify.rest.Product.find({
+  session,
+  id: 1234567890,
+});
+
+console.log(product.title);
+
+// Get all products
+const products = await shopify.rest.Product.all({
+  session,
+  limit: 50,
+});
+
+console.log(products.data); // Array of Product instances
+console.log(products.pageInfo); // Pagination info
+```
+
+Source: [rest/base.ts:95-109](/home/daytona/workspace/source/packages/apps/shopify-api/rest/base.ts#L95)
+
+### Creating Resources
+
+```typescript
+const product = new shopify.rest.Product({session});
+product.title = 'New Product';
+product.body_html = '<p>Description</p>';
+product.vendor = 'My Store';
+
+await product.save();
+
+console.log('Product created:', product.id);
+```
+
+### Updating Resources
+
+```typescript
+const product = await shopify.rest.Product.find({
+  session,
+  id: 1234567890,
+});
+
+product.title = 'Updated Title';
+await product.save({update: true});
+```
+
+### Deleting Resources
+
+```typescript
+const product = await shopify.rest.Product.find({
+  session,
+  id: 1234567890,
+});
+
+await product.delete();
+```
+
+## Error Handling
+
+The REST client throws errors for failed requests:
+
+```typescript
+import {
+  HttpResponseError,
+  HttpThrottlingError,
+  RestResourceError,
+} from '@shopify/shopify-api';
+
+try {
+  const response = await client.get({path: 'products/invalid'});
+} catch (error) {
+  if (error instanceof HttpThrottlingError) {
+    console.error('Rate limited. Retry after:', error.response.retryAfter);
+  } else if (error instanceof HttpResponseError) {
+    console.error('Request failed:', error.response.code);
+    console.error('Body:', error.response.body);
+  } else if (error instanceof RestResourceError) {
+    console.error('Resource error:', error.message);
+  }
+}
+```
+
+Source: `lib/error.ts:20-70`
+
+## Rate Limiting
+
+The client automatically retries on rate limit errors:
+
+```typescript
+const response = await client.get({
+  path: 'products',
+  tries: 3, // Retry up to 3 times
+});
+```
+
+The default retry wait time is 1000ms.
+
+Source: `lib/clients/admin/rest/client.ts:56`
+
+## Deprecation Warnings
+
+The client logs deprecation warnings when using deprecated API features:
+
+```typescript
+// Deprecation warnings are logged automatically
+// Check headers for: X-Shopify-API-Deprecated-Reason
+```
+
+Warnings are throttled to once every 5 minutes per endpoint.
+
+Source: `lib/clients/admin/rest/client.ts:318-359`
+
+## Lossless JSON Parsing
+
+The client uses lossless JSON parsing to preserve numeric precision:
+
+```typescript
+// IDs are automatically converted to strings
+const response = await client.get({path: 'products/1234567890'});
+
+console.log(typeof response.body.product.id); // 'string'
+```
+
+All ID fields (`id`, `*_id`, `*_ids`) are converted to strings to prevent precision loss.
+
+Source: `lib/clients/admin/rest/client.ts:256-305`
+
+## Complete Example
+
+<CodeGroup>
+```typescript Direct Client
+import {shopifyApi} from '@shopify/shopify-api';
+
+const shopify = shopifyApi({...});
+
+app.get('/api/products', async (req, res) => {
+  const session = await loadSession(req);
+  const client = new shopify.clients.Rest({session});
+  
+  try {
+    const response = await client.get({
+      path: 'products',
+      query: {
+        limit: 50,
+        status: 'active',
+      },
+    });
+    
+    res.json({
+      products: response.body.products,
+      pageInfo: response.pageInfo,
+    });
+  } catch (error) {
+    console.error('Failed to fetch products:', error);
+    res.status(500).json({error: 'Failed to fetch products'});
+  }
+});
+```
+
+```typescript REST Resources
+import {restResources} from '@shopify/shopify-api/rest/admin/2024-01';
+
+const shopify = shopifyApi({
+  // ... config
+  restResources,
+});
+
+app.post('/api/products', async (req, res) => {
+  const session = await loadSession(req);
+  
+  const product = new shopify.rest.Product({session});
+  product.title = req.body.title;
+  product.body_html = req.body.description;
+  product.vendor = req.body.vendor;
+  
+  await product.save();
+  
+  res.json({product});
+});
+
+app.put('/api/products/:id', async (req, res) => {
+  const session = await loadSession(req);
+  
+  const product = await shopify.rest.Product.find({
+    session,
+    id: req.params.id,
+  });
+  
+  product.title = req.body.title;
+  await product.save({update: true});
+  
+  res.json({product});
+});
+```
+
+```typescript Pagination
+app.get('/api/products/all', async (req, res) => {
+  const session = await loadSession(req);
+  const client = new shopify.clients.Rest({session});
+  
+  const allProducts = [];
+  let nextPage = {path: 'products', query: {limit: 250}};
+  
+  while (nextPage) {
+    const response = await client.get(nextPage);
+    allProducts.push(...response.body.products);
+    
+    nextPage = response.pageInfo?.nextPage;
+  }
+  
+  res.json({
+    products: allProducts,
+    total: allProducts.length,
+  });
+});
+```
+</CodeGroup>
+
+## Best Practices
+
+<Tip>
+- Use REST resources for cleaner code when available
+- Implement pagination for large datasets
+- Handle rate limiting with retries
+- Check deprecation headers
+- Use appropriate API versions
+- Store numeric IDs as strings
+- Handle errors gracefully
+</Tip>
+
+<Warning>
+The REST client requires a valid access token. Missing access tokens will throw a `MissingRequiredArgument` error.
+
+Source: `lib/clients/admin/rest/client.ts:68-72`
+</Warning>

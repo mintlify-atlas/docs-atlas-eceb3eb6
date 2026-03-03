@@ -1,80 +1,266 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with the Shopify App JavaScript SDK in under 5 minutes by making your first Admin API request.
 ---
 
-## Get started in three steps
+# Quickstart
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide will help you make your first API request to Shopify using the Admin API Client. We'll query for a product in just a few lines of code.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  This quickstart uses the `@shopify/admin-api-client` package, which is perfect for simple API access. If you're building a full Shopify app with OAuth and webhooks, see the [choosing a package guide](/choosing-a-package).
 </Note>
+
+## Prerequisites
+
+Before you begin, you'll need:
+
+- A Shopify store (development or production)
+- An Admin API access token with appropriate scopes
+- Node.js 18 or higher installed
+
+<Tip>
+  Don't have an access token? Create a custom app in your Shopify admin under **Settings > Apps and sales channels > Develop apps** to get one.
+</Tip>
+
+## Installation
+
+Install the Admin API Client package using your preferred package manager:
+
+<CodeGroup>
+
+```bash npm
+npm install @shopify/admin-api-client
+```
+
+```bash yarn
+yarn add @shopify/admin-api-client
+```
+
+```bash pnpm
+pnpm add @shopify/admin-api-client
+```
+
+</CodeGroup>
+
+## Your First API Request
+
+Create a new file called `index.js` (or `index.ts` for TypeScript) and add the following code:
+
+<CodeGroup>
+
+```typescript TypeScript
+import {createAdminApiClient} from '@shopify/admin-api-client';
+
+const client = createAdminApiClient({
+  storeDomain: 'your-shop-name.myshopify.com',
+  apiVersion: '2024-01',
+  accessToken: 'your-admin-api-access-token',
+});
+
+const productQuery = `
+  query ProductQuery($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      handle
+      status
+      totalInventory
+    }
+  }
+`;
+
+const {data, errors} = await client.request(productQuery, {
+  variables: {
+    id: 'gid://shopify/Product/7608002183224',
+  },
+});
+
+if (errors) {
+  console.error('GraphQL errors:', errors);
+} else {
+  console.log('Product:', data.product);
+}
+```
+
+```javascript JavaScript
+const {createAdminApiClient} = require('@shopify/admin-api-client');
+
+const client = createAdminApiClient({
+  storeDomain: 'your-shop-name.myshopify.com',
+  apiVersion: '2024-01',
+  accessToken: 'your-admin-api-access-token',
+});
+
+const productQuery = `
+  query ProductQuery($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      handle
+      status
+      totalInventory
+    }
+  }
+`;
+
+async function fetchProduct() {
+  const {data, errors} = await client.request(productQuery, {
+    variables: {
+      id: 'gid://shopify/Product/7608002183224',
+    },
+  });
+
+  if (errors) {
+    console.error('GraphQL errors:', errors);
+  } else {
+    console.log('Product:', data.product);
+  }
+}
+
+fetchProduct();
+```
+
+</CodeGroup>
+
+<Steps>
+  <Step title="Replace Configuration Values">
+    Update `storeDomain` with your shop's myshopify.com domain and `accessToken` with your Admin API access token.
+  </Step>
+  <Step title="Update the Product ID">
+    Replace the product ID with a valid product ID from your store. You can find product IDs in your Shopify admin.
+  </Step>
+  <Step title="Run the Code">
+    Execute your file with `node index.js` (or `tsx index.ts` for TypeScript).
+  </Step>
+</Steps>
+
+## Understanding the Response
+
+The `client.request()` method returns a normalized response object:
+
+```typescript
+{
+  data?: {
+    product: {
+      id: string;
+      title: string;
+      handle: string;
+      status: string;
+      totalInventory: number;
+    }
+  },
+  errors?: {
+    networkStatusCode?: number;
+    message?: string;
+    graphQLErrors?: any[];
+  },
+  extensions?: Record<string, any>
+}
+```
+
+- **data** - Contains the successful API response
+- **errors** - Contains any network or GraphQL errors
+- **extensions** - Additional metadata like query cost and rate limit info
+
+## Using the REST Client
+
+You can also use the REST Admin API client for REST endpoints:
+
+```typescript
+import {createAdminRestApiClient} from '@shopify/admin-api-client';
+
+const client = createAdminRestApiClient({
+  storeDomain: 'your-shop-name.myshopify.com',
+  apiVersion: '2024-01',
+  accessToken: 'your-admin-api-access-token',
+});
+
+const response = await client.get('products/1234567890');
+
+if (response.ok) {
+  const product = await response.json();
+  console.log('Product:', product);
+}
+```
+
+## Adding TypeScript Types
+
+For full type safety, install the codegen preset to automatically generate types from your queries:
+
+<CodeGroup>
+
+```bash npm
+npm install --save-dev @shopify/api-codegen-preset
+```
+
+```bash yarn
+yarn add --dev @shopify/api-codegen-preset
+```
+
+```bash pnpm
+pnpm add -D @shopify/api-codegen-preset
+```
+
+</CodeGroup>
+
+Create a `.graphqlrc.ts` file:
+
+```typescript
+import {ApiType, shopifyApiProject} from '@shopify/api-codegen-preset';
+
+export default {
+  schema: 'https://shopify.dev/admin-graphql-direct-proxy',
+  documents: ['*.ts', '!node_modules'],
+  projects: {
+    default: shopifyApiProject({
+      apiType: ApiType.Admin,
+      apiVersion: '2024-01',
+      outputDir: './types',
+    }),
+  },
+};
+```
+
+Add a script to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "graphql-codegen": "graphql-codegen"
+  }
+}
+```
+
+Tag your queries with `#graphql` and run `npm run graphql-codegen` to generate types automatically.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Explore Admin API Client" icon="book" href="/api-clients/admin-api-client">
+    Learn about all available methods and configuration options
+  </Card>
+  <Card title="Try Storefront API" icon="storefront" href="/api-clients/storefront-api-client">
+    Build customer-facing features with the Storefront API
+  </Card>
+  <Card title="Build a Full App" icon="rocket" href="/apps/shopify-api">
+    Add OAuth, webhooks, and session management
+  </Card>
+  <Card title="Add Type Safety" icon="shield-check" href="/api-clients/api-codegen-preset">
+    Generate TypeScript types from your GraphQL operations
+  </Card>
+</CardGroup>
+
+## Common Issues
+
+<Warning>
+  **Authentication Error (401)**: Verify your access token is correct and has the required scopes for the data you're querying.
+</Warning>
+
+<Warning>
+  **Invalid API Version**: Make sure you're using a supported API version. The oldest stable version is recommended, but you can check available versions in the [Shopify API documentation](https://shopify.dev/docs/api/admin-graphql).
+</Warning>
+
+<Tip>
+  **Rate Limiting**: The client automatically handles rate limits with retries. You can configure the number of retries with the `retries` option (max 3).
+</Tip>

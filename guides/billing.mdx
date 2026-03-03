@@ -1,0 +1,491 @@
+---
+title: Billing & Subscriptions
+description: Learn how to implement app billing and manage subscriptions
+---
+
+This guide covers implementing billing for your Shopify app, including one-time charges and recurring subscriptions.
+
+## Overview
+
+The library supports multiple billing models:
+
+- **Recurring subscriptions** - Monthly or annual recurring charges
+- **Usage-based billing** - Pay-as-you-go pricing
+- **One-time charges** - Single payment
+
+## Configuration
+
+Define your billing plans in the config:
+
+```typescript
+import {shopifyApi, BillingInterval} from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  // ... other config
+  billing: {
+    'Basic Plan': {
+      lineItems: [
+        {
+          interval: BillingInterval.Every30Days,
+          amount: 10.00,
+          currencyCode: 'USD',
+        },
+      ],
+    },
+    'Premium Plan': {
+      lineItems: [
+        {
+          interval: BillingInterval.Annual,
+          amount: 100.00,
+          currencyCode: 'USD',
+        },
+      ],
+    },
+    'Usage Plan': {
+      lineItems: [
+        {
+          interval: BillingInterval.Usage,
+          amount: 1000.00,
+          currencyCode: 'USD',
+          terms: 'Up to $1,000 per month',
+        },
+      ],
+    },
+    'One-Time Charge': {
+      interval: BillingInterval.OneTime,
+      amount: 50.00,
+      currencyCode: 'USD',
+    },
+  },
+});
+```
+
+## Checking for Active Subscriptions
+
+Check if a shop has an active payment before allowing access:
+
+```typescript
+app.get('/api/products', async (req, res) => {
+  const session = await loadSession(req);
+  
+  const hasPayment = await shopify.billing.check({
+    session,
+    plans: ['Basic Plan', 'Premium Plan'],
+    isTest: process.env.NODE_ENV !== 'production',
+  });
+
+  if (!hasPayment) {
+    return res.status(403).json({
+      error: 'No active subscription',
+      redirectUrl: '/billing',
+    });
+  }
+
+  // Continue with request
+});
+```
+
+**Parameters:**
+- `session` - Current shop session
+- `plans` - Array of plan names to check (optional - checks all if omitted)
+- `isTest` - Whether to include test charges
+
+Source: `lib/billing/check.ts:40-67`
+
+### Check Response
+
+By default, `check()` returns a boolean. Use `returnObject: true` for detailed information:
+
+```typescript
+const result = await shopify.billing.check({
+  session,
+  plans: ['Basic Plan'],
+  isTest: true,
+  returnObject: true,
+});
+
+console.log(result);
+// {
+//   hasActivePayment: true,
+//   appSubscriptions: [{
+//     id: 'gid://shopify/AppSubscription/1',
+//     name: 'Basic Plan',
+//     test: true,
+//     lineItems: [...]
+//   }],
+//   oneTimePurchases: []
+// }
+```
+
+Source: `lib/billing/check.ts:69-109`
+
+## Requesting Payment
+
+Request payment when a shop needs to subscribe:
+
+```typescript
+app.post('/api/billing/subscribe', async (req, res) => {
+  const session = await loadSession(req);
+  const {plan} = req.body;
+  
+  const confirmationUrl = await shopify.billing.request({
+    session,
+    plan: plan,
+    isTest: process.env.NODE_ENV !== 'production',
+  });
+
+  res.json({confirmationUrl});
+});
+```
+
+The `confirmationUrl` redirects the merchant to approve the charge.
+
+Source: `lib/billing/request.ts:99-194`
+
+### Request Parameters
+
+```typescript
+interface BillingRequestParams {
+  session: Session;
+  plan: string;              // Plan name from config
+  isTest?: boolean;          // Default: true
+  returnUrl?: string;        // Where to redirect after approval
+  returnObject?: boolean;    // Return full object vs just URL
+}
+```
+
+### Custom Return URL
+
+```typescript
+const confirmationUrl = await shopify.billing.request({
+  session,
+  plan: 'Basic Plan',
+  returnUrl: 'https://myapp.com/billing/success',
+});
+```
+
+If not provided, embedded apps use the embedded app URL, non-embedded apps use the host URL.
+
+Source: `lib/billing/request.ts:122-131`
+
+## Billing Intervals
+
+<Tabs>
+  <Tab title="Recurring">
+    ```typescript
+    {
+      lineItems: [
+        {
+          interval: BillingInterval.Every30Days,
+          amount: 29.99,
+          currencyCode: 'USD',
+        },
+      ],
+      trialDays: 7, // Optional trial period
+    }
+    ```
+
+    **Available intervals:**
+    - `BillingInterval.Every30Days` - Monthly billing
+    - `BillingInterval.Annual` - Yearly billing
+  </Tab>
+
+  <Tab title="Usage">
+    ```typescript
+    {
+      lineItems: [
+        {
+          interval: BillingInterval.Usage,
+          amount: 1000.00,        // Capped amount
+          currencyCode: 'USD',
+          terms: '$1 per 100 emails sent, up to $1,000/month',
+        },
+      ],
+    }
+    ```
+
+    Usage billing requires:
+    - `amount` - Maximum charge (capped amount)
+    - `terms` - Description shown to merchant
+
+    Source: `lib/billing/request.ts:232-245`
+  </Tab>
+
+  <Tab title="One-Time">
+    ```typescript
+    {
+      interval: BillingInterval.OneTime,
+      amount: 99.99,
+      currencyCode: 'USD',
+    }
+    ```
+
+    One-time charges are single payments, not subscriptions.
+
+    Source: `lib/billing/request.ts:278-308`
+  </Tab>
+</Tabs>
+
+## Line Items
+
+Subscriptions can include multiple line items:
+
+```typescript
+billing: {
+  'Hybrid Plan': {
+    lineItems: [
+      {
+        interval: BillingInterval.Every30Days,
+        amount: 20.00,
+        currencyCode: 'USD',
+      },
+      {
+        interval: BillingInterval.Usage,
+        amount: 500.00,
+        currencyCode: 'USD',
+        terms: 'Additional usage charges',
+      },
+    ],
+  },
+}
+```
+
+Source: `lib/billing/request.ts:204-252`
+
+## Trial Periods
+
+Offer free trials on recurring subscriptions:
+
+```typescript
+billing: {
+  'Premium Plan': {
+    lineItems: [{
+      interval: BillingInterval.Every30Days,
+      amount: 49.99,
+      currencyCode: 'USD',
+    }],
+    trialDays: 14,
+  },
+}
+```
+
+## Discounts
+
+Apply discounts to recurring charges:
+
+```typescript
+billing: {
+  'Annual Plan': {
+    lineItems: [
+      {
+        interval: BillingInterval.Annual,
+        amount: 240.00,
+        currencyCode: 'USD',
+        discount: {
+          durationLimitInIntervals: 3, // 3 billing cycles
+          value: {
+            percentage: 20.0,          // 20% off
+          },
+        },
+      },
+    ],
+  },
+}
+```
+
+Source: `lib/billing/request.ts:217-225`
+
+## Usage Records
+
+For usage-based billing, create usage records:
+
+```typescript
+app.post('/api/track-usage', async (req, res) => {
+  const session = await loadSession(req);
+  const {amount, description} = req.body;
+  
+  await shopify.billing.createUsageRecord({
+    session,
+    subscriptionLineItemId: 'gid://shopify/AppSubscriptionLineItem/1',
+    price: amount,
+    description,
+  });
+  
+  res.json({success: true});
+});
+```
+
+## Updating Usage Cap
+
+Update the capped amount for usage billing:
+
+```typescript
+await shopify.billing.updateUsageCappedAmount({
+  session,
+  subscriptionLineItemId: 'gid://shopify/AppSubscriptionLineItem/1',
+  cappedAmount: 2000.00,
+});
+```
+
+Source: `lib/billing/index.ts:14-25`
+
+## Canceling Subscriptions
+
+Cancel an active subscription:
+
+```typescript
+await shopify.billing.cancel({
+  session,
+  subscriptionId: 'gid://shopify/AppSubscription/1',
+});
+```
+
+## Getting Active Subscriptions
+
+Retrieve all active subscriptions:
+
+```typescript
+const subscriptions = await shopify.billing.subscriptions({
+  session,
+});
+
+console.log(subscriptions);
+// [
+//   {
+//     id: 'gid://shopify/AppSubscription/1',
+//     name: 'Basic Plan',
+//     test: false,
+//     lineItems: [...]
+//   }
+// ]
+```
+
+## Error Handling
+
+```typescript
+import {BillingError} from '@shopify/shopify-api';
+
+try {
+  await shopify.billing.request({...});
+} catch (error) {
+  if (error instanceof BillingError) {
+    console.error('Billing error:', error.message);
+    console.error('Error data:', error.errorData);
+  }
+}
+```
+
+Common errors:
+- Plan not found in config
+- GraphQL user errors (validation failures)
+- Network errors
+
+Source: `lib/error.ts:116-128`
+
+## Complete Example
+
+<CodeGroup>
+```typescript Config
+import {shopifyApi, BillingInterval} from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  apiKey: process.env.SHOPIFY_API_KEY,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET,
+  scopes: ['read_products'],
+  hostName: process.env.HOST,
+  billing: {
+    'Basic': {
+      lineItems: [
+        {
+          interval: BillingInterval.Every30Days,
+          amount: 10.00,
+          currencyCode: 'USD',
+        },
+      ],
+      trialDays: 7,
+    },
+    'Pro': {
+      lineItems: [
+        {
+          interval: BillingInterval.Every30Days,
+          amount: 30.00,
+          currencyCode: 'USD',
+        },
+        {
+          interval: BillingInterval.Usage,
+          amount: 1000.00,
+          currencyCode: 'USD',
+          terms: 'Additional usage up to $1000',
+        },
+      ],
+    },
+  },
+});
+```
+
+```typescript Check & Request
+app.get('/api/protected', async (req, res) => {
+  const session = await loadSession(req);
+  
+  // Check for active subscription
+  const hasPayment = await shopify.billing.check({
+    session,
+    plans: ['Basic', 'Pro'],
+    isTest: process.env.NODE_ENV !== 'production',
+  });
+
+  if (!hasPayment) {
+    // Request payment
+    const confirmationUrl = await shopify.billing.request({
+      session,
+      plan: 'Basic',
+      isTest: process.env.NODE_ENV !== 'production',
+    });
+    
+    return res.json({
+      error: 'Subscription required',
+      confirmationUrl,
+    });
+  }
+
+  // Proceed with protected route
+  res.json({data: 'protected data'});
+});
+```
+
+```typescript Usage Billing
+// Track usage
+app.post('/api/send-email', async (req, res) => {
+  const session = await loadSession(req);
+  
+  // Send email...
+  
+  // Record usage charge ($1 per email)
+  await shopify.billing.createUsageRecord({
+    session,
+    subscriptionLineItemId: req.body.lineItemId,
+    price: 1.00,
+    description: 'Email sent',
+  });
+  
+  res.json({success: true});
+});
+```
+</CodeGroup>
+
+## Best Practices
+
+<Tip>
+- Always use `isTest: true` in development
+- Check for active payments on protected routes
+- Store subscription IDs for usage tracking
+- Handle billing errors gracefully
+- Provide clear upgrade paths
+- Use `returnObject: true` when you need subscription details
+</Tip>
+
+<Warning>
+Billing must be configured in `shopifyApi()` config before using billing functions. Attempting to use billing without configuration throws a `BillingError`.
+
+Source: `lib/billing/check.ts:44-48`
+</Warning>

@@ -1,0 +1,347 @@
+---
+title: 'Configuration'
+description: 'Configuration options and interfaces for the Shopify API library'
+---
+
+## ConfigParams
+
+The configuration parameters interface used when initializing the Shopify API library with `shopifyApi()`.
+
+### Type Definition
+
+```typescript
+interface ConfigParams<
+  Resources extends ShopifyRestResources = ShopifyRestResources,
+  Future extends FutureFlagOptions = FutureFlagOptions,
+> {
+  apiKey?: string;
+  apiSecretKey: string;
+  scopes?: string[] | AuthScopes;
+  hostName: string;
+  hostScheme?: 'http' | 'https';
+  apiVersion: ApiVersion;
+  isEmbeddedApp: boolean;
+  isCustomStoreApp?: boolean;
+  adminApiAccessToken?: string;
+  userAgentPrefix?: string;
+  privateAppStorefrontAccessToken?: string;
+  domainTransformations?: DomainTransformation[];
+  billing?: BillingConfig;
+  restResources?: Resources;
+  logger?: LoggerConfig;
+  future?: Future;
+  isTesting?: boolean;
+}
+```
+
+## ConfigInterface
+
+The validated configuration interface returned after initialization.
+
+### Type Definition
+
+```typescript
+type ConfigInterface<Params extends ConfigParams = ConfigParams> = Omit<
+  Params,
+  'restResources' | 'scopes'
+> & {
+  apiKey: string;
+  hostScheme: 'http' | 'https';
+  scopes?: AuthScopes;
+  isCustomStoreApp: boolean;
+  billing?: BillingConfig;
+  logger: {
+    log: LogFunction;
+    level: LogSeverity;
+    httpRequests: boolean;
+    timestamps: boolean;
+  };
+  future: FutureFlagOptions;
+  isTesting?: boolean;
+};
+```
+
+## API Versions
+
+The `ApiVersion` enum defines available Shopify API versions.
+
+### Available Versions
+
+<ParamField path="ApiVersion.October24" type="string" default="'2024-10'">
+  October 2024 API version
+</ParamField>
+
+<ParamField path="ApiVersion.January25" type="string" default="'2025-01'">
+  January 2025 API version
+</ParamField>
+
+<ParamField path="ApiVersion.April25" type="string" default="'2025-04'">
+  April 2025 API version
+</ParamField>
+
+<ParamField path="ApiVersion.July25" type="string" default="'2025-07'">
+  July 2025 API version
+</ParamField>
+
+<ParamField path="ApiVersion.October25" type="string" default="'2025-10'">
+  October 2025 API version
+</ParamField>
+
+<ParamField path="ApiVersion.January26" type="string" default="'2026-01'">
+  January 2026 API version
+</ParamField>
+
+<ParamField path="ApiVersion.April26" type="string" default="'2026-04'">
+  April 2026 API version
+</ParamField>
+
+<ParamField path="ApiVersion.Unstable" type="string" default="'unstable'">
+  Unstable API version (latest unreleased features)
+</ParamField>
+
+### Example
+
+```typescript
+import { shopifyApi, ApiVersion } from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  apiVersion: ApiVersion.April25, // '2025-04'
+  // ... other config
+});
+```
+
+## Domain Transformations
+
+Configuration for transforming shop domains in split-domain architectures.
+
+### DomainTransformation Interface
+
+```typescript
+interface DomainTransformation {
+  match: RegExp | string;
+  transform: ((matches: RegExpMatchArray) => string | null) | string;
+  includeHost?: boolean;
+}
+```
+
+<ParamField path="match" type="RegExp | string" required>
+  Pattern to match against shop domains (source domain).
+  
+  Can be a RegExp or string (converted to RegExp internally).
+</ParamField>
+
+<ParamField path="transform" type="((matches: RegExpMatchArray) => string | null) | string" required>
+  Transformation function or template string.
+  
+  - **Template string**: Uses `$1`, `$2`, etc. for capture group substitution
+  - **Function**: Receives regex match groups and returns transformed domain
+</ParamField>
+
+<ParamField path="includeHost" type="boolean" default="true">
+  Whether this transformation should also apply to host validation.
+</ParamField>
+
+### Examples
+
+<CodeGroup>
+```typescript Template-Based Transformation
+const shopify = shopifyApi({
+  // ... other config
+  domainTransformations: [
+    {
+      match: /^([a-zA-Z0-9][a-zA-Z0-9-_]*)\.my\.shop\.dev$/,
+      transform: '$1.dev-api.shop.dev'
+    }
+  ],
+});
+
+// shop1.my.shop.dev → shop1.dev-api.shop.dev
+```
+
+```typescript Function-Based Transformation
+const shopify = shopifyApi({
+  // ... other config
+  domainTransformations: [
+    {
+      match: /^([^.]+)\.ui\.example\.com$/,
+      transform: (matches) => {
+        const shopName = matches[1];
+        return shopName.startsWith('test-')
+          ? `${shopName}.api-staging.example.com`
+          : `${shopName}.api.example.com`;
+      }
+    }
+  ],
+});
+
+// myshop.ui.example.com → myshop.api.example.com
+// test-shop.ui.example.com → test-shop.api-staging.example.com
+```
+
+```typescript Multiple Transformations
+const shopify = shopifyApi({
+  // ... other config
+  domainTransformations: [
+    // First transformation for development
+    {
+      match: /^([^.]+)\.dev\.myapp\.io$/,
+      transform: '$1.myshopify.com'
+    },
+    // Second transformation for staging
+    {
+      match: /^([^.]+)\.staging\.myapp\.io$/,
+      transform: '$1.myshopify.com'
+    },
+  ],
+});
+```
+</CodeGroup>
+
+## Logger Configuration
+
+Customization options for logging.
+
+### LoggerConfig Interface
+
+```typescript
+interface LoggerConfig {
+  log?: LogFunction;
+  level?: LogSeverity;
+  httpRequests?: boolean;
+  timestamps?: boolean;
+}
+```
+
+<ParamField path="log" type="LogFunction">
+  A custom log function with signature:
+  
+  ```typescript
+  type LogFunction = (severity: LogSeverity, msg: string) => void;
+  ```
+</ParamField>
+
+<ParamField path="level" type="LogSeverity">
+  The minimum severity level to log.
+</ParamField>
+
+<ParamField path="httpRequests" type="boolean" default="false">
+  Whether to log HTTP requests.
+</ParamField>
+
+<ParamField path="timestamps" type="boolean" default="false">
+  Whether to log timestamps.
+</ParamField>
+
+### LogSeverity Enum
+
+```typescript
+enum LogSeverity {
+  Error = 0,
+  Warning = 1,
+  Info = 2,
+  Debug = 3,
+}
+```
+
+### Example
+
+<CodeGroup>
+```typescript Custom Logger
+import { shopifyApi, LogSeverity } from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  // ... other config
+  logger: {
+    log: (severity, message) => {
+      const levels = ['ERROR', 'WARNING', 'INFO', 'DEBUG'];
+      console.log(`[${levels[severity]}] ${message}`);
+    },
+    level: LogSeverity.Info,
+    httpRequests: true,
+    timestamps: true,
+  },
+});
+```
+
+```typescript Minimal Logging
+import { shopifyApi, LogSeverity } from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  // ... other config
+  logger: {
+    level: LogSeverity.Error, // Only log errors
+    httpRequests: false,
+  },
+});
+```
+
+```typescript Debug Mode
+import { shopifyApi, LogSeverity } from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  // ... other config
+  logger: {
+    level: LogSeverity.Debug, // Log everything
+    httpRequests: true,
+    timestamps: true,
+  },
+});
+```
+</CodeGroup>
+
+## Billing Configuration
+
+See the [Billing API reference](/api-reference/shopify-api/billing) for detailed billing configuration options.
+
+## HTTP Methods
+
+The `Method` enum defines available HTTP methods.
+
+```typescript
+enum Method {
+  Get = 'GET',
+  Post = 'POST',
+  Put = 'PUT',
+  Patch = 'PATCH',
+  Delete = 'DELETE',
+  Head = 'HEAD',
+  Options = 'OPTIONS',
+  Connect = 'CONNECT',
+}
+```
+
+## Shopify Headers
+
+Common Shopify-specific HTTP headers.
+
+```typescript
+enum ShopifyHeader {
+  AccessToken = 'X-Shopify-Access-Token',
+  ApiVersion = 'X-Shopify-API-Version',
+  Domain = 'X-Shopify-Shop-Domain',
+  Hmac = 'X-Shopify-Hmac-Sha256',
+  Topic = 'X-Shopify-Topic',
+  SubTopic = 'X-Shopify-Sub-Topic',
+  WebhookId = 'X-Shopify-Webhook-Id',
+  Name = 'X-Shopify-Name',
+  TriggeredAt = 'X-Shopify-Triggered-At',
+  EventId = 'X-Shopify-Event-Id',
+  StorefrontPrivateToken = 'Shopify-Storefront-Private-Token',
+  StorefrontSDKVariant = 'X-SDK-Variant',
+  StorefrontSDKVersion = 'X-SDK-Version',
+}
+```
+
+## Notes
+
+<Note>
+  All configuration is validated when you call `shopifyApi()`. Missing or invalid required fields will throw a `ShopifyError`.
+</Note>
+
+<Note>
+  For custom store apps, set `isCustomStoreApp: true` and provide `adminApiAccessToken`. The `apiKey` and `scopes` parameters become optional.
+</Note>
+
+<Note>
+  Domain transformations are applied in order. The first matching transformation is used.
+</Note>

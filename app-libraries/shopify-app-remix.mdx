@@ -1,0 +1,605 @@
+---
+title: "@shopify/shopify-app-remix"
+description: Build Shopify apps with Remix - simplified authentication, API access, and webhook handling
+---
+
+`@shopify/shopify-app-remix` makes it easy to build Shopify apps using the Remix framework. It wraps `@shopify/shopify-api` with Remix-specific utilities for authentication, session management, and API access.
+
+## Installation
+
+```bash
+npm install @shopify/shopify-app-remix @shopify/shopify-app-session-storage-prisma
+```
+
+<Note>
+Requires Node.js >= 20.10.0 and Remix >= 2.0.0
+</Note>
+
+## Quick Start
+
+### 1. Configure Your App
+
+Create `app/shopify.server.ts`:
+
+```typescript
+import { shopifyApp } from "@shopify/shopify-app-remix/server";
+import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
+import { restResources } from "@shopify/shopify-api/rest/admin/2024-01";
+import prisma from "~/db.server";
+
+const shopify = shopifyApp({
+  apiKey: process.env.SHOPIFY_API_KEY!,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET!,
+  scopes: process.env.SCOPES?.split(",")!,
+  appUrl: process.env.SHOPIFY_APP_URL!,
+  apiVersion: "2024-01",
+  sessionStorage: new PrismaSessionStorage(prisma),
+  restResources,
+  
+  // Optional: configure webhooks
+  webhooks: {
+    APP_UNINSTALLED: {
+      deliveryMethod: "http",
+      callbackUrl: "/webhooks",
+    },
+  },
+  
+  // Optional: lifecycle hooks
+  hooks: {
+    afterAuth: async ({ session }) => {
+      // Register webhooks after authentication
+      await shopify.registerWebhooks({ session });
+    },
+  },
+});
+
+export default shopify;
+export const authenticate = shopify.authenticate;
+```
+
+### 2. Add Authentication Routes
+
+Remix adapter handles authentication automatically. Create `app/routes/auth.$.tsx`:
+
+```typescript
+import { LoaderFunctionArgs } from "@remix-run/node";
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  await authenticate.admin(request);
+  return null;
+};
+```
+
+### 3. Authenticate Admin Requests
+
+In your route loaders and actions:
+
+```typescript
+import { LoaderFunctionArgs, json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin, session } = await authenticate.admin(request);
+  
+  const response = await admin.graphql(
+    `#graphql
+      query {
+        products(first: 10) {
+          edges {
+            node {
+              id
+              title
+              handle
+            }
+          }
+        }
+      }
+    `
+  );
+  
+  const data = await response.json();
+  
+  return json({ products: data.data.products.edges });
+};
+
+export default function ProductsPage() {
+  const { products } = useLoaderData<typeof loader>();
+  
+  return (
+    <div>
+      {products.map(({ node }) => (
+        <div key={node.id}>{node.title}</div>
+      ))}
+    </div>
+  );
+}
+```
+
+## Configuration
+
+### shopifyApp Options
+
+<ParamField path="apiKey" type="string" required>
+  Your app's API key from the Partner Dashboard.
+  
+  Typically: `process.env.SHOPIFY_API_KEY`
+</ParamField>
+
+<ParamField path="apiSecretKey" type="string" required>
+  Your app's API secret from the Partner Dashboard.
+  
+  Typically: `process.env.SHOPIFY_API_SECRET`
+</ParamField>
+
+<ParamField path="scopes" type="string[]" required>
+  OAuth scopes your app needs.
+  
+  Example: `["read_products", "write_orders"]`
+</ParamField>
+
+<ParamField path="appUrl" type="string" required>
+  Your app's URL (including protocol).
+  
+  Example: `"https://myapp.example.com"` or `process.env.SHOPIFY_APP_URL`
+</ParamField>
+
+<ParamField path="apiVersion" type="string" required>
+  Shopify API version to use.
+  
+  Example: `"2024-01"`
+</ParamField>
+
+<ParamField path="sessionStorage" type="SessionStorage" required>
+  Session storage adapter.
+  
+  See [Session Storage](#session-storage) below.
+</ParamField>
+
+<ParamField path="isEmbeddedApp" type="boolean" default="true">
+  Whether the app is embedded in Shopify Admin.
+</ParamField>
+
+<ParamField path="useOnlineTokens" type="boolean" default="false">
+  Whether to use online access tokens instead of offline.
+  
+  When `true`, both online and offline tokens are saved for background jobs.
+</ParamField>
+
+<ParamField path="distribution" type="AppDistribution" default="AppDistribution.AppStore">
+  App distribution type:
+  - `AppDistribution.AppStore`: Public app
+  - `AppDistribution.SingleMerchant`: Private app
+  - `AppDistribution.ShopifyAdmin`: Custom app in Shopify Admin
+</ParamField>
+
+<ParamField path="webhooks" type="object">
+  Shop-specific webhook configuration.
+  
+  See [Webhooks](#webhooks) section.
+</ParamField>
+
+<ParamField path="hooks" type="object">
+  Lifecycle hooks.
+  
+  See [Lifecycle Hooks](#lifecycle-hooks) section.
+</ParamField>
+
+<ParamField path="billing" type="BillingConfig">
+  Billing configuration for subscriptions.
+  
+  See [Billing](#billing) section.
+</ParamField>
+
+## Authentication
+
+### Admin Authentication
+
+Authenticate admin requests in loaders and actions:
+
+```typescript
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin, session, billing, cors } = await authenticate.admin(request);
+  
+  // admin: GraphQL/REST client
+  // session: Current session
+  // billing: Billing utilities
+  // cors: CORS helper
+  
+  return json({ shop: session.shop });
+};
+```
+
+<Accordion title="Admin Context Properties">
+  <ParamField path="admin" type="AdminApiContext">
+    API client for making Admin API requests.
+    
+    **Methods:**
+    - `admin.graphql()`: Make GraphQL requests
+    - `admin.rest`: Access REST API
+  </ParamField>
+  
+  <ParamField path="session" type="Session">
+    Current authenticated session.
+    
+    **Properties:**
+    - `session.shop`: Shop domain
+    - `session.accessToken`: Access token
+    - `session.scope`: Granted scopes
+  </ParamField>
+  
+  <ParamField path="billing" type="Billing">
+    Billing utilities for the current shop.
+    
+    **Methods:**
+    - `billing.require()`: Require active billing
+    - `billing.request()`: Request new subscription
+    - `billing.check()`: Check billing status
+  </ParamField>
+  
+  <ParamField path="cors" type="function">
+    Helper to add CORS headers to responses.
+  </ParamField>
+</Accordion>
+
+### GraphQL Requests
+
+<CodeGroup>
+```typescript Query
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  
+  const response = await admin.graphql(
+    `#graphql
+      query getProducts($first: Int!) {
+        products(first: $first) {
+          edges {
+            node {
+              id
+              title
+              handle
+            }
+          }
+        }
+      }
+    `,
+    {
+      variables: { first: 10 },
+    }
+  );
+  
+  const data = await response.json();
+  return json(data.data);
+};
+```
+
+```typescript Mutation
+import { ActionFunctionArgs, json } from "@remix-run/node";
+import { GraphqlQueryError } from "@shopify/shopify-api";
+import { authenticate } from "~/shopify.server";
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { admin, redirect } = await authenticate.admin(request);
+  
+  try {
+    await admin.graphql(
+      `#graphql
+        mutation updateProductTitle($input: ProductInput!) {
+          productUpdate(input: $input) {
+            product {
+              id
+            }
+          }
+        }
+      `,
+      {
+        variables: {
+          input: { id: "123", title: "New title" },
+        },
+      }
+    );
+    
+    return redirect("/app/product-updated");
+  } catch (error) {
+    if (error instanceof GraphqlQueryError) {
+      return json({ errors: error.body?.errors }, { status: 500 });
+    }
+    
+    return new Response("Failed to update product", { status: 500 });
+  }
+};
+```
+</CodeGroup>
+
+### REST API Requests
+
+```typescript
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  
+  // Using REST client
+  const response = await admin.rest.get({ path: "products" });
+  const products = response.body.products;
+  
+  // Using REST resources (type-safe)
+  const productsTyped = await admin.rest.resources.Product.all({
+    session: admin.session,
+    limit: 10,
+  });
+  
+  return json({ products });
+};
+```
+
+### Webhook Authentication
+
+Handle incoming webhooks:
+
+```typescript
+// app/routes/webhooks.tsx
+import { ActionFunctionArgs } from "@remix-run/node";
+import { authenticate } from "~/shopify.server";
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { topic, admin, payload, session } = await authenticate.webhook(request);
+  
+  // Session may be undefined if app is uninstalled
+  if (!session) {
+    throw new Response();
+  }
+  
+  switch (topic) {
+    case "PRODUCTS_UPDATE":
+      await admin.graphql(
+        `#graphql
+          mutation setMetafield($productId: ID!, $time: String!) {
+            metafieldsSet(metafields: {
+              ownerId: $productId
+              namespace: "my-app",
+              key: "webhook_received_at",
+              value: $time,
+              type: "string",
+            }) {
+              metafields {
+                key
+                value
+              }
+            }
+          }
+        `,
+        {
+          variables: {
+            productId: payload.admin_graphql_api_id,
+            time: new Date().toISOString(),
+          },
+        }
+      );
+      break;
+  }
+  
+  return new Response();
+};
+```
+
+### Public Authentication
+
+Handle public requests (App Proxy, Checkout UI Extensions):
+
+```typescript
+// App Proxy
+import { authenticate } from "~/shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { liquid, storefront } = await authenticate.public.appProxy(request);
+  
+  // Make Storefront API requests
+  const response = await storefront.graphql(
+    `query { shop { name } }`
+  );
+  
+  // Return Liquid template
+  return liquid("<h1>{{ shop.name }}</h1>");
+};
+```
+
+## Webhooks
+
+### Registering Webhooks
+
+<Tabs>
+  <Tab title="In Configuration">
+    ```typescript
+    import { DeliveryMethod } from "@shopify/shopify-app-remix/server";
+    
+    const shopify = shopifyApp({
+      // ... other config
+      webhooks: {
+        PRODUCTS_CREATE: {
+          deliveryMethod: DeliveryMethod.Http,
+          callbackUrl: "/webhooks",
+        },
+        ORDERS_PAID: {
+          deliveryMethod: DeliveryMethod.Http,
+          callbackUrl: "/webhooks",
+        },
+      },
+      hooks: {
+        afterAuth: async ({ session }) => {
+          // Register webhooks after OAuth
+          await shopify.registerWebhooks({ session });
+        },
+      },
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Manual Registration">
+    ```typescript
+    import shopify from "~/shopify.server";
+    
+    // In a loader or background job
+    export const loader = async ({ request }: LoaderFunctionArgs) => {
+      const { session } = await authenticate.admin(request);
+      
+      // Register all configured webhooks
+      const response = await shopify.registerWebhooks({ session });
+      
+      return json(response);
+    };
+    ```
+  </Tab>
+</Tabs>
+
+## Billing
+
+Handle app billing and subscriptions:
+
+### Configure Billing
+
+```typescript
+import { shopifyApp, BillingInterval } from "@shopify/shopify-app-remix/server";
+
+const shopify = shopifyApp({
+  // ... other config
+  billing: {
+    "Premium Plan": {
+      amount: 10.0,
+      currencyCode: "USD",
+      interval: BillingInterval.Every30Days,
+      trialDays: 7,
+    },
+  },
+});
+```
+
+### Require Active Billing
+
+```typescript
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { billing } = await authenticate.admin(request);
+  
+  // Require active billing or redirect to payment
+  await billing.require({
+    plans: ["Premium Plan"],
+    onFailure: async () => billing.request({ plan: "Premium Plan" }),
+  });
+  
+  // User has active subscription
+  return json({ success: true });
+};
+```
+
+## Session Storage
+
+Choose a session storage adapter:
+
+<Tabs>
+  <Tab title="Prisma">
+    ```bash
+    npm install @shopify/shopify-app-session-storage-prisma
+    ```
+    
+    ```typescript
+    import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
+    import prisma from "~/db.server";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new PrismaSessionStorage(prisma),
+    });
+    ```
+  </Tab>
+  
+  <Tab title="PostgreSQL">
+    ```bash
+    npm install @shopify/shopify-app-session-storage-postgresql
+    ```
+    
+    ```typescript
+    import { PostgreSQLSessionStorage } from "@shopify/shopify-app-session-storage-postgresql";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new PostgreSQLSessionStorage(
+        "postgresql://user:pass@localhost/db"
+      ),
+    });
+    ```
+  </Tab>
+  
+  <Tab title="MongoDB">
+    ```bash
+    npm install @shopify/shopify-app-session-storage-mongodb
+    ```
+    
+    ```typescript
+    import { MongoDBSessionStorage } from "@shopify/shopify-app-session-storage-mongodb";
+    
+    const shopify = shopifyApp({
+      sessionStorage: new MongoDBSessionStorage(
+        "mongodb://localhost:27017",
+        "sessions"
+      ),
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Lifecycle Hooks
+
+```typescript
+const shopify = shopifyApp({
+  // ... other config
+  hooks: {
+    afterAuth: async ({ session, admin }) => {
+      // Called after successful OAuth
+      console.log(`Shop ${session.shop} installed the app`);
+      
+      // Register webhooks
+      await shopify.registerWebhooks({ session });
+      
+      // Create initial data
+      await admin.graphql(
+        `mutation { /* setup query */ }`
+      );
+    },
+  },
+});
+```
+
+## Error Handling
+
+Handle authentication errors:
+
+```typescript
+import { boundary } from "@shopify/shopify-app-remix/server";
+
+// Error boundary for authentication errors
+export const ErrorBoundary = boundary.error;
+```
+
+<Warning>
+  Always use `authenticate.admin()` in routes that require authentication to ensure proper session validation.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core API" icon="code" href="/app-libraries/shopify-api">
+    Learn about @shopify/shopify-api
+  </Card>
+  <Card title="Session Storage" icon="database">
+    Explore session storage options
+  </Card>
+  <Card title="Shopify CLI" icon="terminal">
+    Use Shopify CLI for development
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/Shopify/shopify-app-js/tree/main/packages/apps/shopify-app-remix">
+    View on GitHub
+  </Card>
+</CardGroup>

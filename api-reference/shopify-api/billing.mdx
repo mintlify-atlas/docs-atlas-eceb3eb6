@@ -1,0 +1,570 @@
+---
+title: 'Billing API'
+description: 'Create, check, and manage app subscriptions and charges'
+---
+
+## Overview
+
+The billing API provides functions for managing app charges, subscriptions, and usage-based billing.
+
+Access the billing API through your configured Shopify instance:
+
+```typescript
+const shopify = shopifyApi({ /* config */ });
+const billing = shopify.billing;
+```
+
+## Configuration
+
+Define your billing plans when initializing the Shopify API:
+
+```typescript
+import { shopifyApi, BillingInterval } from '@shopify/shopify-api';
+
+const shopify = shopifyApi({
+  // ... other config
+  billing: {
+    'Basic Plan': {
+      amount: 10.0,
+      currencyCode: 'USD',
+      interval: BillingInterval.Every30Days,
+    },
+    'Premium Plan': {
+      lineItems: [
+        {
+          amount: 30.0,
+          currencyCode: 'USD',
+          interval: BillingInterval.Every30Days,
+        },
+        {
+          amount: 100.0,
+          currencyCode: 'USD',
+          interval: BillingInterval.Usage,
+          terms: '1 dollar per 100 emails',
+        },
+      ],
+    },
+  },
+});
+```
+
+## check()
+
+Checks if the shop has an active payment for the specified plan(s).
+
+### Signature
+
+```typescript
+type BillingCheck = <Params extends BillingCheckParams>(
+  params: Params,
+) => Promise<BillingCheckResponse<Params>>;
+```
+
+### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session to use for this check.
+</ParamField>
+
+<ParamField path="plans" type="string | string[]">
+  The plan name(s) to check. If not provided, checks for any active subscription.
+</ParamField>
+
+<ParamField path="isTest" type="boolean" default="false">
+  Whether to include test charges. Test shops and demo shops cannot be charged.
+</ParamField>
+
+### Returns
+
+Returns a `Promise<BillingCheckResponseObject>`:
+
+<ResponseField name="hasActivePayment" type="boolean">
+  Whether the shop has an active payment method for the plan(s).
+</ResponseField>
+
+<ResponseField name="oneTimePurchases" type="OneTimePurchase[]">
+  Array of one-time purchases the shop has made.
+  
+  <Expandable title="OneTimePurchase">
+    <ResponseField name="id" type="string">
+      The ID of the one-time purchase.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      The name of the purchased plan.
+    </ResponseField>
+    <ResponseField name="test" type="boolean">
+      Whether this is a test purchase.
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Status: `ACTIVE`, `CANCELLED`, `PENDING`, `DECLINED`, `EXPIRED`, `FROZEN`, or `ACCEPTED`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="appSubscriptions" type="AppSubscription[]">
+  Array of active app subscriptions.
+  
+  <Expandable title="AppSubscription">
+    <ResponseField name="id" type="string">
+      The subscription ID.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      The plan name.
+    </ResponseField>
+    <ResponseField name="test" type="boolean">
+      Whether this is a test subscription.
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Status: `ACTIVE`, `CANCELLED`, `PENDING`, `DECLINED`, `EXPIRED`, `FROZEN`, or `ACCEPTED`.
+    </ResponseField>
+    <ResponseField name="trialDays" type="number">
+      Number of trial days.
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      Creation date/time.
+    </ResponseField>
+    <ResponseField name="currentPeriodEnd" type="string">
+      Current period end date/time.
+    </ResponseField>
+    <ResponseField name="lineItems" type="ActiveSubscriptionLineItem[]">
+      Line items for this subscription.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+```typescript Check Any Active Subscription
+const billing = await shopify.billing.check({ session });
+
+if (!billing.hasActivePayment) {
+  // Redirect to billing
+  const confirmation = await shopify.billing.request({
+    session,
+    plan: 'Basic Plan',
+  });
+  return redirect(confirmation);
+}
+```
+
+```typescript Check Specific Plan
+const billing = await shopify.billing.check({
+  session,
+  plans: 'Premium Plan',
+});
+
+if (billing.hasActivePayment) {
+  console.log('Shop has Premium Plan');
+  console.log('Subscriptions:', billing.appSubscriptions);
+}
+```
+
+```typescript Check Multiple Plans
+const billing = await shopify.billing.check({
+  session,
+  plans: ['Basic Plan', 'Premium Plan'],
+});
+
+if (billing.hasActivePayment) {
+  console.log('Shop has one of the accepted plans');
+}
+```
+</CodeGroup>
+
+## request()
+
+Requests payment from the merchant for a plan.
+
+### Signature
+
+```typescript
+type BillingRequest = <Params extends BillingRequestParams>(
+  params: Params,
+) => Promise<BillingRequestResponse<Params>>;
+```
+
+### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session to use for this request.
+</ParamField>
+
+<ParamField path="plan" type="string" required>
+  The plan name to request (must match a plan defined in config).
+</ParamField>
+
+<ParamField path="isTest" type="boolean" default="false">
+  Whether this is a test purchase.
+</ParamField>
+
+<ParamField path="returnUrl" type="string">
+  Override the return URL after purchase completion.
+</ParamField>
+
+<ParamField path="returnObject" type="boolean" default="false">
+  Whether to return the full response object instead of just the confirmation URL.
+</ParamField>
+
+<ParamField path="amount" type="number">
+  Override the plan amount (one-time purchases only).
+</ParamField>
+
+<ParamField path="currencyCode" type="string">
+  Override the currency code.
+</ParamField>
+
+### Returns
+
+By default, returns a `Promise<string>` containing the confirmation URL.
+
+With `returnObject: true`, returns:
+
+<ResponseField name="confirmationUrl" type="string">
+  The URL to redirect the merchant to confirm the charge.
+</ResponseField>
+
+<ResponseField name="oneTimePurchase" type="OneTimePurchase">
+  The created one-time purchase (if applicable).
+</ResponseField>
+
+<ResponseField name="appSubscription" type="AppSubscription">
+  The created app subscription (if applicable).
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+```typescript Basic Usage
+const confirmationUrl = await shopify.billing.request({
+  session,
+  plan: 'Basic Plan',
+});
+
+// Redirect merchant to confirm
+return redirect(confirmationUrl);
+```
+
+```typescript Test Purchase
+const confirmationUrl = await shopify.billing.request({
+  session,
+  plan: 'Premium Plan',
+  isTest: true,
+  returnUrl: 'https://myapp.com/billing/confirmed',
+});
+```
+
+```typescript With Full Response
+const response = await shopify.billing.request({
+  session,
+  plan: 'Basic Plan',
+  returnObject: true,
+});
+
+console.log('Confirmation URL:', response.confirmationUrl);
+console.log('Subscription:', response.appSubscription);
+```
+
+```typescript Override Amount
+const confirmationUrl = await shopify.billing.request({
+  session,
+  plan: 'Custom Charge',
+  amount: 25.00,
+  currencyCode: 'USD',
+});
+```
+</CodeGroup>
+
+## cancel()
+
+Cancels an active subscription.
+
+### Signature
+
+```typescript
+type BillingCancel = (
+  params: BillingCancelParams,
+) => Promise<AppSubscription>;
+```
+
+### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session to use for this request.
+</ParamField>
+
+<ParamField path="subscriptionId" type="string" required>
+  The subscription ID to cancel.
+</ParamField>
+
+<ParamField path="prorate" type="boolean" default="false">
+  Whether to prorate the cancellation.
+</ParamField>
+
+<ParamField path="isTest" type="boolean" default="false">
+  Whether to consider test purchases.
+</ParamField>
+
+### Returns
+
+Returns the cancelled `AppSubscription` object.
+
+### Example
+
+```typescript
+const cancelled = await shopify.billing.cancel({
+  session,
+  subscriptionId: 'gid://shopify/AppSubscription/1234567890',
+  prorate: true,
+});
+
+console.log('Cancelled subscription:', cancelled.id);
+console.log('Status:', cancelled.status); // 'CANCELLED'
+```
+
+## subscriptions()
+
+Retrieves all active subscriptions for the shop.
+
+### Signature
+
+```typescript
+type BillingSubscriptions = (
+  params: BillingSubscriptionParams,
+) => Promise<ActiveSubscriptions>;
+```
+
+### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session to use for this request.
+</ParamField>
+
+### Returns
+
+<ResponseField name="activeSubscriptions" type="AppSubscription[]">
+  Array of active app subscriptions.
+</ResponseField>
+
+### Example
+
+```typescript
+const { activeSubscriptions } = await shopify.billing.subscriptions({ session });
+
+activeSubscriptions.forEach(sub => {
+  console.log(`Plan: ${sub.name}`);
+  console.log(`Status: ${sub.status}`);
+  console.log(`Created: ${sub.createdAt}`);
+});
+```
+
+## createUsageRecord()
+
+Creates a usage record for a usage-based billing plan.
+
+### Signature
+
+```typescript
+type BillingCreateUsageRecord = (
+  params: BillingCreateUsageRecordParams,
+) => Promise<UsageRecord>;
+```
+
+### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session to use for this request.
+</ParamField>
+
+<ParamField path="description" type="string" required>
+  Description of the usage record.
+</ParamField>
+
+<ParamField path="price" type="object" required>
+  Price information:
+  
+  <Expandable title="Price Object">
+    <ParamField path="amount" type="number" required>
+      The amount to charge for this usage.
+    </ParamField>
+    <ParamField path="currencyCode" type="string" required>
+      The currency code (e.g., 'USD').
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="subscriptionLineItemId" type="string">
+  The subscription line item ID to associate the usage record with.
+</ParamField>
+
+<ParamField path="idempotencyKey" type="string">
+  Idempotency key to prevent duplicate charges.
+</ParamField>
+
+<ParamField path="isTest" type="boolean" default="false">
+  Whether this is a test charge.
+</ParamField>
+
+### Returns
+
+Returns the created `UsageRecord` object.
+
+### Example
+
+```typescript
+const usageRecord = await shopify.billing.createUsageRecord({
+  session,
+  description: '100 emails sent',
+  price: {
+    amount: 1.00,
+    currencyCode: 'USD',
+  },
+  subscriptionLineItemId: 'gid://shopify/AppSubscriptionLineItem/1234',
+  idempotencyKey: `usage-${Date.now()}`,
+});
+
+console.log('Usage record created:', usageRecord.id);
+```
+
+## updateUsageCappedAmount()
+
+Updates the capped amount for a usage-based billing subscription.
+
+### Signature
+
+```typescript
+type BillingUpdateUsageCappedAmount = (
+  params: BillingUpdateUsageCappedAmountParams,
+) => Promise<UpdateCappedAmountConfirmation>;
+```
+
+### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session to use for this request.
+</ParamField>
+
+<ParamField path="subscriptionLineItemId" type="string" required>
+  The subscription line item ID to update.
+</ParamField>
+
+<ParamField path="cappedAmount" type="object" required>
+  The new capped amount:
+  
+  <Expandable title="CappedAmount Object">
+    <ParamField path="amount" type="number" required>
+      The new capped amount.
+    </ParamField>
+    <ParamField path="currencyCode" type="string" required>
+      The currency code.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Returns
+
+<ResponseField name="confirmationUrl" type="string">
+  URL to confirm the update.
+</ResponseField>
+
+<ResponseField name="appSubscription" type="AppSubscription">
+  The updated subscription.
+</ResponseField>
+
+### Example
+
+```typescript
+const result = await shopify.billing.updateUsageCappedAmount({
+  session,
+  subscriptionLineItemId: 'gid://shopify/AppSubscriptionLineItem/1234',
+  cappedAmount: {
+    amount: 200.00,
+    currencyCode: 'USD',
+  },
+});
+
+// Redirect to confirmation URL if needed
+if (result.confirmationUrl) {
+  return redirect(result.confirmationUrl);
+}
+```
+
+## Billing Configuration Types
+
+### BillingInterval
+
+```typescript
+enum BillingInterval {
+  OneTime = 'ONE_TIME',
+  Every30Days = 'EVERY_30_DAYS',
+  Annual = 'ANNUAL',
+  Usage = 'USAGE',
+}
+```
+
+### One-Time Plan
+
+```typescript
+interface BillingConfigOneTimePlan {
+  amount: number;
+  currencyCode: string;
+  interval: BillingInterval.OneTime;
+}
+```
+
+### Recurring Plan
+
+```typescript
+interface BillingConfigRecurringLineItem {
+  amount: number;
+  currencyCode: string;
+  interval: BillingInterval.Every30Days | BillingInterval.Annual;
+  discount?: {
+    durationLimitInIntervals?: number;
+    value: {
+      amount: number;
+    } | {
+      percentage: number;
+    };
+  };
+}
+```
+
+### Usage-Based Plan
+
+```typescript
+interface BillingConfigUsageLineItem {
+  interval: BillingInterval.Usage;
+  amount: number; // Capped amount
+  currencyCode: string;
+  terms: string; // Usage terms description
+}
+```
+
+### Subscription with Line Items
+
+```typescript
+interface BillingConfigSubscriptionLineItemPlan {
+  replacementBehavior?: BillingReplacementBehavior;
+  trialDays?: number;
+  lineItems: (BillingConfigRecurringLineItem | BillingConfigUsageLineItem)[];
+}
+```
+
+## Notes
+
+<Note>
+  Test charges don't actually charge the merchant. Use `isTest: true` during development.
+</Note>
+
+<Note>
+  For usage-based billing, you must create usage records within the billing period to charge for usage.
+</Note>
+
+<Note>
+  The merchant must approve all charges through the confirmation URL before they take effect.
+</Note>
+
+<Note>
+  Plan configurations must be defined when initializing `shopifyApi()` in the `billing` config option.
+</Note>

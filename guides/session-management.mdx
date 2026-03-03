@@ -1,0 +1,468 @@
+---
+title: Session Management
+description: Learn how to manage sessions and store authentication data
+---
+
+This guide covers session management, including creating, storing, and validating sessions.
+
+## Session Overview
+
+A `Session` object stores authentication information for a shop or user:
+
+```typescript
+interface Session {
+  id: string;                    // Unique session identifier
+  shop: string;                  // Shop domain (e.g., example.myshopify.com)
+  state: string;                 // OAuth state parameter
+  isOnline: boolean;            // Online (user) vs offline (shop) token
+  scope?: string;               // Granted API scopes
+  accessToken?: string;         // Access token for API requests
+  expires?: Date;               // Token expiration (online tokens only)
+  refreshToken?: string;        // Refresh token (if expiring tokens enabled)
+  refreshTokenExpires?: Date;   // Refresh token expiration
+  onlineAccessInfo?: {          // User info (online tokens only)
+    associated_user: {
+      id: number;
+      first_name: string;
+      last_name: string;
+      email: string;
+      account_owner: boolean;
+      locale: string;
+      collaborator: boolean;
+      email_verified: boolean;
+    };
+  };
+}
+```
+
+Source: `lib/session/session.ts:149-188`
+
+## Creating Sessions
+
+Sessions are typically created during OAuth:
+
+```typescript
+const {session} = await shopify.auth.callback({
+  rawRequest: req,
+  rawResponse: res,
+});
+
+// Session is now ready to use
+console.log(session.id);          // 'offline_example.myshopify.com'
+console.log(session.shop);        // 'example.myshopify.com'
+console.log(session.accessToken); // 'shpat_xxxxx'
+```
+
+### Manual Session Creation
+
+You can also create sessions manually:
+
+```typescript
+import {Session} from '@shopify/shopify-api';
+
+const session = new Session({
+  id: 'offline_example.myshopify.com',
+  shop: 'example.myshopify.com',
+  state: 'state-value',
+  isOnline: false,
+  accessToken: 'shpat_xxxxx',
+  scope: 'read_products,write_orders',
+});
+```
+
+Source: `lib/session/session.ts:190-192`
+
+## Session Storage
+
+Configure session storage when initializing the API:
+
+```typescript
+import {shopifyApi} from '@shopify/shopify-api';
+import {MemorySessionStorage} from '@shopify/shopify-app-session-storage-memory';
+
+const shopify = shopifyApi({
+  // ... other config
+  sessionStorage: new MemorySessionStorage(),
+});
+```
+
+### Available Storage Adapters
+
+- `@shopify/shopify-app-session-storage-memory` - In-memory (development only)
+- `@shopify/shopify-app-session-storage-postgresql` - PostgreSQL
+- `@shopify/shopify-app-session-storage-mysql` - MySQL
+- `@shopify/shopify-app-session-storage-mongodb` - MongoDB
+- `@shopify/shopify-app-session-storage-redis` - Redis
+- `@shopify/shopify-app-session-storage-sqlite` - SQLite
+
+## Storing Sessions
+
+Store sessions after OAuth:
+
+```typescript
+app.get('/auth/callback', async (req, res) => {
+  const {session} = await shopify.auth.callback({
+    rawRequest: req,
+    rawResponse: res,
+  });
+
+  // Store the session
+  await shopify.config.sessionStorage.storeSession(session);
+  
+  res.redirect(`/?shop=${session.shop}`);
+});
+```
+
+## Loading Sessions
+
+Load sessions by ID:
+
+```typescript
+const sessionId = 'offline_example.myshopify.com';
+const session = await shopify.config.sessionStorage.loadSession(sessionId);
+
+if (!session) {
+  throw new Error('Session not found');
+}
+```
+
+### Session ID Format
+
+- **Offline tokens**: `offline_{shop}`
+- **Online tokens**: `{shop}_{userId}`
+
+```typescript
+// Offline session ID
+const offlineId = `offline_${shop}`;
+
+// Online session ID
+const onlineId = `${shop}_${userId}`;
+```
+
+## Validating Sessions
+
+### Check if Active
+
+Validate that a session is still active:
+
+```typescript
+const session = await shopify.config.sessionStorage.loadSession(sessionId);
+
+if (!session.isActive(shopify.config.scopes)) {
+  // Session is invalid - re-authenticate
+  return res.redirect('/auth');
+}
+
+// Session is valid, proceed
+```
+
+**A session is active when:**
+1. It has an access token
+2. The token is not expired
+3. The granted scopes match required scopes
+
+Source: `lib/session/session.ts:198-206`
+
+### Check Expiration
+
+```typescript
+if (session.isExpired()) {
+  console.log('Session is expired');
+  // Refresh or re-authenticate
+}
+```
+
+Source: `lib/session/session.ts:235-240`
+
+### Check Scopes
+
+```typescript
+const hasScope = session.isScopeIncluded('write_products');
+
+if (!hasScope) {
+  console.log('Session missing required scope');
+  // Re-authenticate with new scopes
+}
+```
+
+Source: `lib/session/session.ts:224-230`
+
+## Deleting Sessions
+
+Delete sessions when merchants uninstall:
+
+```typescript
+// In APP_UNINSTALLED webhook handler
+shopify.webhooks.addHandlers({
+  APP_UNINSTALLED: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: '/webhooks/app-uninstalled',
+    callback: async (topic, shop, body) => {
+      const sessionId = `offline_${shop}`;
+      await shopify.config.sessionStorage.deleteSession(sessionId);
+      console.log(`Deleted session for ${shop}`);
+    },
+  },
+});
+```
+
+## Session Serialization
+
+### To Object
+
+Convert a session to a plain object:
+
+```typescript
+const sessionData = session.toObject();
+
+console.log(sessionData);
+// {
+//   id: 'offline_example.myshopify.com',
+//   shop: 'example.myshopify.com',
+//   state: 'state',
+//   isOnline: false,
+//   scope: 'read_products',
+//   accessToken: 'shpat_xxxxx'
+// }
+```
+
+Source: `lib/session/session.ts:245-272`
+
+### To Property Array
+
+Convert to key-value pairs for database storage:
+
+```typescript
+const properties = session.toPropertyArray();
+
+console.log(properties);
+// [
+//   ['id', 'offline_example.myshopify.com'],
+//   ['shop', 'example.myshopify.com'],
+//   ['isOnline', false],
+//   ['accessToken', 'shpat_xxxxx'],
+//   // ...
+// ]
+```
+
+Source: `lib/session/session.ts:300-341`
+
+### From Property Array
+
+Reconstruct a session from property array:
+
+```typescript
+const entries = [
+  ['id', 'offline_example.myshopify.com'],
+  ['shop', 'example.myshopify.com'],
+  ['isOnline', false],
+  ['accessToken', 'shpat_xxxxx'],
+];
+
+const session = Session.fromPropertyArray(entries);
+```
+
+Source: `lib/session/session.ts:25-147`
+
+## Online vs Offline Sessions
+
+<Tabs>
+  <Tab title="Offline Sessions">
+    **Offline sessions** represent the shop's long-term access.
+
+    ```typescript
+    // Create offline session during OAuth
+    await shopify.auth.begin({
+      shop,
+      callbackPath: '/auth/callback',
+      isOnline: false,
+      rawRequest: req,
+      rawResponse: res,
+    });
+    ```
+
+    **Characteristics:**
+    - Tied to the shop, not a user
+    - No expiration date
+    - Persist until app is uninstalled
+    - Used for background jobs, webhooks
+
+    **Session ID format:** `offline_{shop}`
+  </Tab>
+
+  <Tab title="Online Sessions">
+    **Online sessions** represent a specific user's access.
+
+    ```typescript
+    // Create online session during OAuth
+    await shopify.auth.begin({
+      shop,
+      callbackPath: '/auth/callback',
+      isOnline: true,
+      rawRequest: req,
+      rawResponse: res,
+    });
+    ```
+
+    **Characteristics:**
+    - Tied to a specific user
+    - Has an expiration date
+    - Includes user information in `onlineAccessInfo`
+    - Used for user-specific operations
+
+    **Session ID format:** `{shop}_{userId}`
+
+    **User information:**
+    ```typescript
+    if (session.isOnline && session.onlineAccessInfo) {
+      console.log('User:', session.onlineAccessInfo.associated_user);
+      console.log('Email:', session.onlineAccessInfo.associated_user.email);
+      console.log('Owner:', session.onlineAccessInfo.associated_user.account_owner);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Session Comparison
+
+Compare two sessions:
+
+```typescript
+const session1 = await shopify.config.sessionStorage.loadSession(id1);
+const session2 = await shopify.config.sessionStorage.loadSession(id2);
+
+if (session1.equals(session2)) {
+  console.log('Sessions are identical');
+}
+```
+
+Source: `lib/session/session.ts:277-295`
+
+## Decoding Session Tokens
+
+For embedded apps, decode session tokens from requests:
+
+```typescript
+const sessionToken = req.headers['authorization']?.replace('Bearer ', '');
+
+const payload = await shopify.session.decodeSessionToken(sessionToken);
+
+console.log('Shop:', payload.dest);
+console.log('User ID:', payload.sub);
+```
+
+## Error Handling
+
+```typescript
+import {InvalidSession, SessionStorageError} from '@shopify/shopify-api';
+
+try {
+  const session = await shopify.config.sessionStorage.loadSession(id);
+} catch (error) {
+  if (error instanceof SessionStorageError) {
+    console.error('Storage error:', error.message);
+  } else if (error instanceof InvalidSession) {
+    console.error('Invalid session data:', error.message);
+  }
+}
+```
+
+Source: `lib/error.ts:97-113`
+
+## Complete Example
+
+<CodeGroup>
+```typescript Setup
+import {shopifyApi} from '@shopify/shopify-api';
+import {PostgreSQLSessionStorage} from '@shopify/shopify-app-session-storage-postgresql';
+
+const shopify = shopifyApi({
+  apiKey: process.env.SHOPIFY_API_KEY,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET,
+  scopes: ['read_products', 'write_orders'],
+  hostName: process.env.HOST,
+  sessionStorage: new PostgreSQLSessionStorage(
+    process.env.DATABASE_URL
+  ),
+});
+```
+
+```typescript Store & Load
+// OAuth callback - store session
+app.get('/auth/callback', async (req, res) => {
+  const {session} = await shopify.auth.callback({
+    rawRequest: req,
+    rawResponse: res,
+  });
+
+  await shopify.config.sessionStorage.storeSession(session);
+  
+  res.redirect(`/?shop=${session.shop}`);
+});
+
+// Load session for API requests
+app.get('/api/products', async (req, res) => {
+  const shop = req.query.shop;
+  const sessionId = `offline_${shop}`;
+  
+  const session = await shopify.config.sessionStorage.loadSession(sessionId);
+  
+  if (!session || !session.isActive(shopify.config.scopes)) {
+    return res.redirect('/auth');
+  }
+  
+  const client = new shopify.clients.Graphql({session});
+  // Make API calls...
+});
+```
+
+```typescript Middleware
+// Session loading middleware
+async function loadSession(req, res, next) {
+  const shop = req.query.shop || req.body.shop;
+  
+  if (!shop) {
+    return res.status(400).json({error: 'Missing shop parameter'});
+  }
+  
+  const sessionId = `offline_${shop}`;
+  const session = await shopify.config.sessionStorage.loadSession(sessionId);
+  
+  if (!session) {
+    return res.status(401).json({
+      error: 'No session found',
+      redirectUrl: '/auth',
+    });
+  }
+  
+  if (!session.isActive(shopify.config.scopes)) {
+    return res.status(401).json({
+      error: 'Session expired',
+      redirectUrl: '/auth',
+    });
+  }
+  
+  req.session = session;
+  next();
+}
+
+app.use('/api/*', loadSession);
+```
+</CodeGroup>
+
+## Best Practices
+
+<Tip>
+- Always validate sessions before API calls
+- Use offline tokens for background jobs
+- Use online tokens for user-specific operations
+- Store both online and offline sessions
+- Delete sessions on app uninstall
+- Implement session refresh for expiring tokens
+- Use production-ready storage (PostgreSQL, MySQL, Redis)
+- Never store sessions in memory in production
+</Tip>
+
+<Warning>
+Memory session storage is only for development. It doesn't persist across restarts and doesn't scale. Always use a database adapter in production.
+</Warning>

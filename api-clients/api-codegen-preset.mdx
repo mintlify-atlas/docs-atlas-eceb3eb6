@@ -1,0 +1,650 @@
+---
+title: API Codegen Preset
+description: Generate TypeScript types from your GraphQL operations for Shopify APIs
+---
+
+The API Codegen Preset enables automatic TypeScript type generation for your GraphQL operations using [`graphql-codegen`](https://the-guild.dev/graphql/codegen). It parses queries tagged with `#graphql` and generates type-safe interfaces for your Shopify API clients.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install --save-dev @shopify/api-codegen-preset
+```
+
+```bash yarn
+yarn add --dev @shopify/api-codegen-preset
+```
+
+```bash pnpm
+pnpm add -D @shopify/api-codegen-preset
+```
+</CodeGroup>
+
+## Quick Start
+
+<Steps>
+  <Step title="Install the preset">
+    ```bash
+    npm install --save-dev @shopify/api-codegen-preset
+    ```
+  </Step>
+  
+  <Step title="Create configuration file">
+    Create a `.graphqlrc.ts` file in your project root:
+    
+    ```typescript
+    import {ApiType, shopifyApiProject} from '@shopify/api-codegen-preset';
+
+    export default {
+      schema: 'https://shopify.dev/admin-graphql-direct-proxy',
+      documents: ['**/*.{js,ts,jsx,tsx}', '!node_modules'],
+      projects: {
+        default: shopifyApiProject({
+          apiType: ApiType.Admin,
+          apiVersion: '2025-01',
+          outputDir: './types',
+        }),
+      },
+    };
+    ```
+  </Step>
+  
+  <Step title="Add npm script">
+    Add to your `package.json`:
+    
+    ```json
+    {
+      "scripts": {
+        "graphql-codegen": "graphql-codegen"
+      }
+    }
+    ```
+  </Step>
+  
+  <Step title="Tag your queries">
+    ```typescript
+    const {data} = await client.request(
+      `#graphql
+      query GetProducts($first: Int!) {
+        products(first: $first) {
+          edges {
+            node {
+              id
+              title
+            }
+          }
+        }
+      }`,
+      {variables: {first: 10}}
+    );
+    ```
+  </Step>
+  
+  <Step title="Generate types">
+    ```bash
+    npm run graphql-codegen
+    ```
+  </Step>
+</Steps>
+
+## Configuration Options
+
+The preset provides three levels of configuration:
+
+### 1. `shopifyApiProject()` - Recommended
+
+One-stop configuration for a complete codegen project:
+
+<ParamField path="apiType" type="ApiType" required>
+  The Shopify API to use: `ApiType.Admin`, `ApiType.Storefront`, or `ApiType.Customer`
+</ParamField>
+
+<ParamField path="apiVersion" type="string">
+  API version to use (e.g., `'2025-01'`). Defaults to oldest stable version
+</ParamField>
+
+<ParamField path="outputDir" type="string" default="'.'">
+  Directory for generated type files
+</ParamField>
+
+<ParamField path="documents" type="string[]" default="['**/*.{ts,tsx}']">
+  Glob patterns for files to parse
+</ParamField>
+
+<ParamField path="module" type="string">
+  Override the module whose types will be augmented
+</ParamField>
+
+<ParamField path="declarations" type="boolean" default="true">
+  Generate `.d.ts` files (true) or `.ts` files (false)
+</ParamField>
+
+<ParamField path="enumsAsConst" type="boolean" default="false">
+  Generate enums as const assertions instead of TypeScript enums
+</ParamField>
+
+<ParamField path="apiKey" type="string">
+  App's API key (required for Customer Account API)
+</ParamField>
+
+```typescript
+// .graphqlrc.ts
+import {shopifyApiProject, ApiType} from '@shopify/api-codegen-preset';
+
+export default {
+  schema: 'https://shopify.dev/admin-graphql-direct-proxy/2025-01',
+  documents: ['app/**/*.{ts,tsx}'],
+  projects: {
+    default: shopifyApiProject({
+      apiType: ApiType.Admin,
+      apiVersion: '2025-01',
+      documents: ['app/**/*.{ts,tsx}'],
+      outputDir: './app/types',
+    }),
+  },
+};
+```
+
+### 2. `shopifyApiTypes()` - Custom Projects
+
+Provides the `generates` configuration for custom project setups:
+
+```typescript
+import {ApiType, pluckConfig, shopifyApiTypes} from '@shopify/api-codegen-preset';
+
+export default {
+  schema: 'https://shopify.dev/admin-graphql-direct-proxy/2025-01',
+  documents: ['app/**/*.{ts,tsx}'],
+  projects: {
+    default: {
+      schema: 'https://shopify.dev/admin-graphql-direct-proxy/2025-01',
+      documents: ['app/**/*.{ts,tsx}'],
+      extensions: {
+        codegen: {
+          pluckConfig,
+          generates: shopifyApiTypes({
+            apiType: ApiType.Admin,
+            apiVersion: '2025-01',
+            outputDir: './app/types',
+          }),
+        },
+      },
+    },
+  },
+};
+```
+
+### 3. `preset` - Full Control
+
+Low-level preset for complete control:
+
+```typescript
+import {ApiType, pluckConfig, preset} from '@shopify/api-codegen-preset';
+
+export default {
+  schema: 'https://shopify.dev/admin-graphql-direct-proxy/2025-01',
+  documents: ['**/*.{ts,tsx}'],
+  projects: {
+    default: {
+      schema: 'https://shopify.dev/admin-graphql-direct-proxy/2025-01',
+      documents: ['**/*.{ts,tsx}'],
+      extensions: {
+        codegen: {
+          pluckConfig,
+          generates: {
+            './types/admin.schema.json': {
+              plugins: ['introspection'],
+              config: {minify: true},
+            },
+            './types/admin.types.d.ts': {
+              plugins: ['typescript'],
+            },
+            './types/admin.generated.d.ts': {
+              preset,
+              presetConfig: {
+                apiType: ApiType.Admin,
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+```
+
+## API Types
+
+The preset supports three Shopify APIs:
+
+```typescript
+import {ApiType} from '@shopify/api-codegen-preset';
+
+// Admin API
+ApiType.Admin
+
+// Storefront API
+ApiType.Storefront
+
+// Customer Account API
+ApiType.Customer
+```
+
+## Generated Files
+
+The codegen process generates three files:
+
+<CodeGroup>
+```typescript admin.types.d.ts
+// Base TypeScript types from the GraphQL schema
+export type Product = {
+  id: string;
+  title: string;
+  handle: string;
+  // ... all schema types
+};
+```
+
+```json admin.schema.json
+// Introspection schema (minified)
+{"__schema":{"types":[...]}}
+```
+
+```typescript admin.generated.d.ts
+// Generated operation types
+declare module '@shopify/admin-api-client' {
+  interface AdminQueries {
+    GetProducts: {
+      variables: GetProductsQueryVariables;
+      return: GetProductsQuery;
+    };
+  }
+}
+```
+</CodeGroup>
+
+## Usage with Clients
+
+Once types are generated, your API clients automatically detect them:
+
+<Tabs>
+  <Tab title="Admin API">
+    ```typescript
+    import {createAdminApiClient} from '@shopify/admin-api-client';
+    import './types/admin.generated.d.ts';
+
+    const client = createAdminApiClient({...});
+
+    // Fully typed response
+    const {data} = await client.request(
+      `#graphql
+      query GetProducts($first: Int!) {
+        products(first: $first) {
+          edges {
+            node {
+              id
+              title
+            }
+          }
+        }
+      }`,
+      {variables: {first: 10}}
+    );
+
+    // data.products.edges is fully typed
+    data?.products.edges.forEach(({node}) => {
+      console.log(node.title); // string
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Storefront API">
+    ```typescript
+    import {createStorefrontApiClient} from '@shopify/storefront-api-client';
+    import './types/storefront.generated.d.ts';
+
+    const client = createStorefrontApiClient({...});
+
+    const {data} = await client.request(
+      `#graphql
+      query GetProduct($handle: String!) {
+        product(handle: $handle) {
+          id
+          title
+          priceRange {
+            minVariantPrice {
+              amount
+              currencyCode
+            }
+          }
+        }
+      }`,
+      {variables: {handle: 'shoe'}}
+    );
+
+    // data.product is fully typed
+    console.log(data?.product.title);
+    ```
+  </Tab>
+</Tabs>
+
+## Advanced Configuration
+
+### Multiple APIs
+
+Generate types for multiple APIs in one project:
+
+```typescript
+import {ApiType, shopifyApiProject} from '@shopify/api-codegen-preset';
+import type {IGraphQLConfig} from 'graphql-config';
+
+const config: IGraphQLConfig = {
+  projects: {
+    // Admin API for backend
+    default: shopifyApiProject({
+      apiType: ApiType.Admin,
+      apiVersion: '2025-01',
+      documents: ['app/**/*.{ts,tsx}'],
+      outputDir: './app/types',
+    }),
+    // Storefront API for UI extensions
+    storefront: shopifyApiProject({
+      apiType: ApiType.Storefront,
+      apiVersion: '2025-01',
+      documents: ['extensions/**/*.{ts,tsx}'],
+      outputDir: './extensions/types',
+    }),
+  },
+};
+
+export default config;
+```
+
+Generate types for a specific project:
+
+```bash
+npm run graphql-codegen --project=storefront
+```
+
+### Enums as Const Assertions
+
+Avoid runtime enum imports by using const assertions:
+
+```typescript
+export default {
+  projects: {
+    default: shopifyApiProject({
+      apiType: ApiType.Admin,
+      apiVersion: '2025-01',
+      outputDir: './types',
+      enumsAsConst: true,
+    }),
+  },
+};
+```
+
+With `enumsAsConst: true`:
+
+<CodeGroup>
+```typescript Without enumsAsConst
+// Must import enum
+import {MetafieldOwnerType} from './types/admin.types';
+
+const variables = {
+  ownerType: MetafieldOwnerType.Product
+};
+```
+
+```typescript With enumsAsConst
+// Use string literal directly
+const variables = {
+  ownerType: 'PRODUCT' // Type-safe!
+};
+```
+</CodeGroup>
+
+### TypeScript Files Instead of Declarations
+
+Generate `.ts` files to import enums in runtime code:
+
+```typescript
+export default {
+  projects: {
+    default: shopifyApiProject({
+      apiType: ApiType.Admin,
+      apiVersion: '2025-01',
+      outputDir: './types',
+      declarations: false, // Generate .ts instead of .d.ts
+    }),
+  },
+};
+```
+
+This allows:
+
+```typescript
+import {ProductStatus} from './types/admin.types';
+
+const status = ProductStatus.Active;
+```
+
+<Note>
+Generating `.ts` files may slightly increase bundle size, but enables runtime enum usage.
+</Note>
+
+### Shopify Functions
+
+Enable autocompletion for Shopify Function schemas:
+
+```typescript
+import fs from 'fs';
+import {ApiType, shopifyApiProject} from '@shopify/api-codegen-preset';
+import type {IGraphQLConfig} from 'graphql-config';
+
+function getConfig(): IGraphQLConfig {
+  const config: IGraphQLConfig = {
+    projects: {
+      default: shopifyApiProject({
+        apiType: ApiType.Admin,
+        apiVersion: '2025-01',
+        documents: ['app/**/*.{ts,tsx}'],
+        outputDir: './app/types',
+      }),
+    },
+  };
+
+  // Add projects for each Shopify Function
+  const extensions = fs.readdirSync('./extensions');
+  
+  for (const entry of extensions) {
+    const schema = `./extensions/${entry}/schema.graphql`;
+    if (fs.existsSync(schema)) {
+      config.projects[entry] = {
+        schema,
+        documents: [`./extensions/${entry}/**/*.graphql`],
+      };
+    }
+  }
+
+  return config;
+}
+
+export default getConfig();
+```
+
+## Watch Mode
+
+Auto-regenerate types on file changes:
+
+```bash
+npm run graphql-codegen -- --watch
+```
+
+## Troubleshooting
+
+### No documents found
+
+If codegen fails with "no documents found":
+
+1. Ensure you have at least one `#graphql` tagged query
+2. Or set `ignoreNoDocuments: true` in config:
+
+```typescript
+export default {
+  schema: 'https://shopify.dev/admin-graphql-direct-proxy',
+  documents: ['**/*.{ts,tsx}'],
+  ignoreNoDocuments: true,
+  projects: {...},
+};
+```
+
+### Unnamed operations
+
+All operations must have names:
+
+<CodeGroup>
+```graphql Bad
+query {
+  shop {
+    name
+  }
+}
+```
+
+```graphql Good
+query GetShop {
+  shop {
+    name
+  }
+}
+```
+</CodeGroup>
+
+### TypeScript not finding types
+
+Ensure your `tsconfig.json` includes the output directory:
+
+```json
+{
+  "compilerOptions": {
+    "types": ["./types"]
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "types/**/*"
+  ]
+}
+```
+
+## Exported Utilities
+
+### `pluckConfig`
+
+Configuration for extracting GraphQL operations from files:
+
+```typescript
+import {pluckConfig} from '@shopify/api-codegen-preset';
+
+// Enables #graphql and /* GraphQL */ tags
+```
+
+### API Types
+
+```typescript
+export enum ApiType {
+  Admin = 'Admin',
+  Storefront = 'Storefront',
+  Customer = 'Customer',
+}
+```
+
+### Configuration Interfaces
+
+```typescript
+export interface ShopifyApiProjectOptions {
+  apiType: ApiType;
+  apiVersion?: string;
+  outputDir?: string;
+  documents?: string[];
+  module?: string;
+  declarations?: boolean;
+  apiKey?: string;
+  enumsAsConst?: boolean;
+}
+```
+
+## Best Practices
+
+<Tip>
+**Commit Generated Files**: Commit the generated type files to your repository so team members don't need to regenerate them.
+</Tip>
+
+<Note>
+**Use Named Operations**: Always name your queries and mutations for better type inference and debugging.
+</Note>
+
+<Warning>
+**API Version Sync**: Keep your codegen `apiVersion` in sync with your client's API version to avoid type mismatches.
+</Warning>
+
+## Examples
+
+### Basic Admin API
+
+```typescript
+// .graphqlrc.ts
+import {ApiType, shopifyApiProject} from '@shopify/api-codegen-preset';
+
+export default {
+  schema: 'https://shopify.dev/admin-graphql-direct-proxy/2025-01',
+  documents: ['**/*.ts'],
+  projects: {
+    default: shopifyApiProject({
+      apiType: ApiType.Admin,
+      apiVersion: '2025-01',
+      outputDir: './types',
+    }),
+  },
+};
+```
+
+### Multiple Projects
+
+```typescript
+import {ApiType, shopifyApiProject} from '@shopify/api-codegen-preset';
+
+export default {
+  projects: {
+    admin: shopifyApiProject({
+      apiType: ApiType.Admin,
+      apiVersion: '2025-01',
+      documents: ['backend/**/*.ts'],
+      outputDir: './backend/types',
+    }),
+    storefront: shopifyApiProject({
+      apiType: ApiType.Storefront,
+      apiVersion: '2025-01',
+      documents: ['frontend/**/*.ts'],
+      outputDir: './frontend/types',
+    }),
+  },
+};
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Admin API Client" icon="gear" href="/api-clients/admin-api-client">
+    Use generated types with the Admin API Client
+  </Card>
+  
+  <Card title="Storefront API Client" icon="store" href="/api-clients/storefront-api-client">
+    Use generated types with the Storefront API Client
+  </Card>
+  
+  <Card title="GraphQL Codegen Docs" icon="book" href="https://the-guild.dev/graphql/codegen">
+    Learn more about GraphQL Code Generator
+  </Card>
+</CardGroup>

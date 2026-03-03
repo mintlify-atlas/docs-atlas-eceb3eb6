@@ -1,0 +1,594 @@
+---
+title: Error Handling
+description: Learn how to handle errors in the Shopify API library
+---
+
+This guide covers error handling best practices and the various error types thrown by the library.
+
+## Error Classes
+
+The library provides specific error classes for different failure scenarios:
+
+```typescript
+import {
+  // Base error
+  ShopifyError,
+  
+  // Authentication errors
+  InvalidOAuthError,
+  InvalidHmacError,
+  InvalidJwtError,
+  MissingJwtTokenError,
+  CookieNotFound,
+  BotActivityDetected,
+  PrivateAppError,
+  
+  // HTTP errors
+  HttpResponseError,
+  HttpRetriableError,
+  HttpThrottlingError,
+  HttpInternalError,
+  HttpRequestError,
+  HttpMaxRetriesError,
+  
+  // GraphQL errors
+  GraphqlQueryError,
+  
+  // Webhook errors
+  InvalidWebhookError,
+  MissingWebhookCallbackError,
+  InvalidDeliveryMethodError,
+  
+  // Session errors
+  InvalidSession,
+  SessionStorageError,
+  
+  // Resource errors
+  RestResourceError,
+  
+  // Billing errors
+  BillingError,
+  
+  // Validation errors
+  InvalidShopError,
+  InvalidHostError,
+  MissingRequiredArgument,
+  UnsupportedClientType,
+  InvalidRequestError,
+} from '@shopify/shopify-api';
+```
+
+Source: `lib/error.ts:1-129`
+
+## Authentication Errors
+
+### OAuth Errors
+
+```typescript
+import {
+  InvalidOAuthError,
+  CookieNotFound,
+  BotActivityDetected,
+} from '@shopify/shopify-api';
+
+try {
+  const {session} = await shopify.auth.callback({
+    rawRequest: req,
+    rawResponse: res,
+  });
+} catch (error) {
+  if (error instanceof BotActivityDetected) {
+    // Bot detected during OAuth
+    return res.status(410).send('Bot activity detected');
+  }
+  
+  if (error instanceof CookieNotFound) {
+    // OAuth state cookie missing
+    console.error('Cookie not found - possible cookie issues');
+    return res.redirect('/auth');
+  }
+  
+  if (error instanceof InvalidOAuthError) {
+    // Invalid HMAC or state mismatch
+    console.error('Invalid OAuth callback');
+    return res.status(400).send('Authentication failed');
+  }
+}
+```
+
+Source: `lib/error.ts:94-96`
+
+### HMAC Validation Errors
+
+```typescript
+import {InvalidHmacError} from '@shopify/shopify-api';
+
+try {
+  const isValid = await shopify.utils.validateHmac(queryParams);
+} catch (error) {
+  if (error instanceof InvalidHmacError) {
+    console.error('HMAC validation failed');
+    return res.status(401).send('Unauthorized');
+  }
+}
+```
+
+Source: `lib/error.ts:10`
+
+## HTTP Errors
+
+### Response Errors
+
+```typescript
+import {
+  HttpResponseError,
+  HttpRetriableError,
+  HttpThrottlingError,
+} from '@shopify/shopify-api';
+
+try {
+  const client = new shopify.clients.Graphql({session});
+  const response = await client.request(query);
+} catch (error) {
+  if (error instanceof HttpThrottlingError) {
+    // Rate limited - retry after delay
+    const retryAfter = error.response.retryAfter || 1000;
+    console.log(`Rate limited. Retry after ${retryAfter}ms`);
+    
+    await new Promise(resolve => setTimeout(resolve, retryAfter));
+    // Retry request...
+  }
+  
+  if (error instanceof HttpRetriableError) {
+    // Temporary error - can retry
+    console.error('Retriable error:', error.response.code);
+  }
+  
+  if (error instanceof HttpResponseError) {
+    // Any HTTP error
+    console.error('HTTP Error:', error.response.code);
+    console.error('Status:', error.response.statusText);
+    console.error('Body:', error.response.body);
+  }
+}
+```
+
+Source: `lib/error.ts:33-70`
+
+### Error Response Structure
+
+```typescript
+interface HttpResponseData {
+  code: number;              // HTTP status code
+  statusText: string;        // Status text
+  body?: Record<string, unknown>;  // Response body
+  headers?: Record<string, unknown>; // Response headers
+}
+
+// HttpThrottlingError adds:
+interface HttpThrottlingErrorData extends HttpResponseData {
+  retryAfter?: number;       // Milliseconds to wait
+}
+```
+
+Source: `lib/error.ts:23-28`
+
+## GraphQL Errors
+
+```typescript
+import {GraphqlQueryError} from '@shopify/shopify-api';
+
+try {
+  const response = await client.request(query);
+  
+  // Check for GraphQL-level errors
+  if (response.errors?.graphQLErrors) {
+    console.error('GraphQL errors:', response.errors.graphQLErrors);
+  }
+} catch (error) {
+  if (error instanceof GraphqlQueryError) {
+    console.error('Query failed:', error.message);
+    console.error('Response:', error.response);
+    console.error('Headers:', error.headers);
+    console.error('Body:', error.body);
+  }
+}
+```
+
+Source: `lib/error.ts:74-92`
+
+## Webhook Errors
+
+```typescript
+import {
+  InvalidWebhookError,
+  MissingWebhookCallbackError,
+} from '@shopify/shopify-api';
+
+try {
+  await shopify.webhooks.process({
+    rawBody,
+    rawRequest: req,
+    rawResponse: res,
+  });
+} catch (error) {
+  if (error instanceof MissingWebhookCallbackError) {
+    // Handler registered without callback
+    console.error('Webhook handler missing callback');
+    return res.status(500).send('Configuration error');
+  }
+  
+  if (error instanceof InvalidWebhookError) {
+    // Validation failed or processing error
+    console.error('Invalid webhook:', error.message);
+    console.error('Response:', error.response);
+    return res.status(401).send('Invalid webhook');
+  }
+}
+```
+
+Source: `lib/error.ts:99-111`
+
+## Session Errors
+
+```typescript
+import {InvalidSession, SessionStorageError} from '@shopify/shopify-api';
+
+try {
+  const session = await shopify.config.sessionStorage.loadSession(id);
+  
+  if (!session) {
+    throw new Error('Session not found');
+  }
+  
+  if (!session.isActive(shopify.config.scopes)) {
+    throw new Error('Session expired or invalid');
+  }
+} catch (error) {
+  if (error instanceof SessionStorageError) {
+    console.error('Storage error:', error.message);
+    // Database or storage issue
+  }
+  
+  if (error instanceof InvalidSession) {
+    console.error('Invalid session data:', error.message);
+    // Session data corrupted
+  }
+}
+```
+
+Source: `lib/error.ts:97-112`
+
+## Billing Errors
+
+```typescript
+import {BillingError} from '@shopify/shopify-api';
+
+try {
+  const confirmationUrl = await shopify.billing.request({
+    session,
+    plan: 'Premium',
+  });
+} catch (error) {
+  if (error instanceof BillingError) {
+    console.error('Billing error:', error.message);
+    console.error('Error data:', error.errorData);
+    
+    // Common scenarios:
+    // - Plan not found in config
+    // - GraphQL validation errors
+    // - Network errors
+  }
+}
+```
+
+Source: `lib/error.ts:116-128`
+
+## Validation Errors
+
+```typescript
+import {
+  InvalidShopError,
+  InvalidHostError,
+  MissingRequiredArgument,
+} from '@shopify/shopify-api';
+
+try {
+  const client = new shopify.clients.Graphql({session});
+} catch (error) {
+  if (error instanceof MissingRequiredArgument) {
+    console.error('Missing required argument:', error.message);
+    // Missing access token, session, etc.
+  }
+  
+  if (error instanceof InvalidShopError) {
+    console.error('Invalid shop domain:', error.message);
+  }
+  
+  if (error instanceof InvalidHostError) {
+    console.error('Invalid host parameter:', error.message);
+  }
+}
+```
+
+Source: `lib/error.ts:11-115`
+
+## REST Resource Errors
+
+```typescript
+import {RestResourceError} from '@shopify/shopify-api';
+
+try {
+  const product = await shopify.rest.Product.find({
+    session,
+    id: productId,
+  });
+} catch (error) {
+  if (error instanceof RestResourceError) {
+    console.error('Resource error:', error.message);
+    // Missing IDs, invalid paths, etc.
+  }
+}
+```
+
+Source: `lib/error.ts:72`
+
+## Error Handling Patterns
+
+### Retry Logic
+
+```typescript
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  delay = 1000
+): Promise<T> {
+  let lastError;
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      
+      if (error instanceof HttpThrottlingError) {
+        // Use Shopify's retry-after header
+        const retryAfter = error.response.retryAfter || delay;
+        await new Promise(resolve => setTimeout(resolve, retryAfter));
+      } else if (error instanceof HttpRetriableError) {
+        // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+      } else {
+        // Non-retriable error, throw immediately
+        throw error;
+      }
+    }
+  }
+  
+  throw lastError;
+}
+
+// Usage
+const response = await withRetry(() =>
+  client.request(query)
+);
+```
+
+### Centralized Error Handler
+
+```typescript
+function handleShopifyError(error: Error, req: Request, res: Response) {
+  // Log all errors
+  console.error('Shopify error:', error);
+  
+  // Authentication errors
+  if (error instanceof InvalidOAuthError || 
+      error instanceof CookieNotFound) {
+    return res.redirect('/auth');
+  }
+  
+  if (error instanceof BotActivityDetected) {
+    return res.status(410).send('Gone');
+  }
+  
+  // Rate limiting
+  if (error instanceof HttpThrottlingError) {
+    return res.status(429).json({
+      error: 'Rate limited',
+      retryAfter: error.response.retryAfter,
+    });
+  }
+  
+  // Webhook errors
+  if (error instanceof InvalidWebhookError) {
+    return res.status(401).send('Unauthorized');
+  }
+  
+  // Session errors
+  if (error instanceof InvalidSession || 
+      error instanceof SessionStorageError) {
+    return res.redirect('/auth');
+  }
+  
+  // Validation errors
+  if (error instanceof MissingRequiredArgument ||
+      error instanceof InvalidShopError) {
+    return res.status(400).json({
+      error: error.message,
+    });
+  }
+  
+  // HTTP errors
+  if (error instanceof HttpResponseError) {
+    return res.status(error.response.code).json({
+      error: error.message,
+      details: error.response.body,
+    });
+  }
+  
+  // Generic Shopify error
+  if (error instanceof ShopifyError) {
+    return res.status(500).json({
+      error: error.message,
+    });
+  }
+  
+  // Unknown error
+  return res.status(500).json({
+    error: 'Internal server error',
+  });
+}
+
+// Use in routes
+app.get('/api/products', async (req, res) => {
+  try {
+    const session = await loadSession(req);
+    const client = new shopify.clients.Graphql({session});
+    const response = await client.request(query);
+    res.json(response.data);
+  } catch (error) {
+    handleShopifyError(error, req, res);
+  }
+});
+```
+
+### Express Error Middleware
+
+```typescript
+import {ShopifyError} from '@shopify/shopify-api';
+
+app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
+  if (error instanceof ShopifyError) {
+    handleShopifyError(error, req, res);
+  } else {
+    next(error);
+  }
+});
+```
+
+## Complete Example
+
+<CodeGroup>
+```typescript API Route
+import {
+  HttpThrottlingError,
+  HttpResponseError,
+  GraphqlQueryError,
+  InvalidSession,
+} from '@shopify/shopify-api';
+
+app.get('/api/products', async (req, res) => {
+  try {
+    const session = await loadSession(req);
+    
+    if (!session?.isActive(shopify.config.scopes)) {
+      throw new InvalidSession('Session expired');
+    }
+    
+    const client = new shopify.clients.Graphql({session});
+    
+    const response = await client.request(
+      `query {
+        products(first: 10) {
+          edges {
+            node {
+              id
+              title
+            }
+          }
+        }
+      }`
+    );
+    
+    res.json(response.data);
+    
+  } catch (error) {
+    if (error instanceof HttpThrottlingError) {
+      const retryAfter = error.response.retryAfter || 1000;
+      res.set('Retry-After', String(retryAfter / 1000));
+      return res.status(429).json({
+        error: 'Rate limited',
+        retryAfter,
+      });
+    }
+    
+    if (error instanceof InvalidSession) {
+      return res.status(401).json({
+        error: 'Session invalid',
+        redirectUrl: '/auth',
+      });
+    }
+    
+    if (error instanceof GraphqlQueryError) {
+      return res.status(500).json({
+        error: 'GraphQL query failed',
+        details: error.body,
+      });
+    }
+    
+    if (error instanceof HttpResponseError) {
+      return res.status(error.response.code).json({
+        error: error.message,
+        body: error.response.body,
+      });
+    }
+    
+    console.error('Unexpected error:', error);
+    res.status(500).json({error: 'Internal server error'});
+  }
+});
+```
+
+```typescript Webhook Handler
+import {
+  InvalidWebhookError,
+  MissingWebhookCallbackError,
+} from '@shopify/shopify-api';
+
+app.post('/webhooks/*', async (req, res) => {
+  const rawBody = await getRawBody(req);
+  
+  try {
+    await shopify.webhooks.process({
+      rawBody,
+      rawRequest: req,
+      rawResponse: res,
+    });
+    
+    res.status(200).send('OK');
+    
+  } catch (error) {
+    if (error instanceof InvalidWebhookError) {
+      console.error('Invalid webhook:', error.message);
+      return res.status(401).send('Unauthorized');
+    }
+    
+    if (error instanceof MissingWebhookCallbackError) {
+      console.error('Missing callback:', error.message);
+      return res.status(500).send('Configuration error');
+    }
+    
+    console.error('Webhook error:', error);
+    res.status(500).send('Error');
+  }
+});
+```
+</CodeGroup>
+
+## Best Practices
+
+<Tip>
+- Always use specific error classes, not generic `Error`
+- Implement retry logic for retriable errors
+- Log errors with context (shop, user, request ID)
+- Return appropriate HTTP status codes
+- Don't expose internal errors to users
+- Handle rate limiting gracefully
+- Use centralized error handling
+- Monitor error rates in production
+- Test error scenarios
+</Tip>
+
+<Warning>
+Never log sensitive data (access tokens, API keys) in error messages. The library's error classes don't include tokens, but be careful with custom logging.
+</Warning>

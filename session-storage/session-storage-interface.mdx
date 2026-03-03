@@ -1,0 +1,368 @@
+---
+title: SessionStorage Interface
+description: Complete reference for the SessionStorage interface and its methods
+---
+
+The `SessionStorage` interface defines the contract that all session storage implementations must follow. This ensures consistent behavior across different database adapters.
+
+## Interface Definition
+
+From the source code at `packages/apps/session-storage/shopify-app-session-storage/src/types.ts`:
+
+```typescript
+import {Session} from '@shopify/shopify-api';
+
+/**
+ * Defines the strategy to be used to store sessions for the Shopify App.
+ */
+export interface SessionStorage {
+  /**
+   * Creates or updates the given session in storage.
+   *
+   * @param session Session to store
+   */
+  storeSession(session: Session): Promise<boolean>;
+
+  /**
+   * Loads a session from storage.
+   *
+   * @param id Id of the session to load
+   */
+  loadSession(id: string): Promise<Session | undefined>;
+
+  /**
+   * Deletes a session from storage.
+   *
+   * @param id Id of the session to delete
+   */
+  deleteSession(id: string): Promise<boolean>;
+
+  /**
+   * Deletes an array of sessions from storage.
+   *
+   * @param ids Array of session id's to delete
+   */
+  deleteSessions(ids: string[]): Promise<boolean>;
+
+  /**
+   * Return an array of sessions for a given shop (or [] if none found).
+   *
+   * @param shop shop of the session(s) to return
+   */
+  findSessionsByShop(shop: string): Promise<Session[]>;
+}
+```
+
+## Methods
+
+### storeSession
+
+Creates or updates a session in storage.
+
+<ParamField path="session" type="Session" required>
+  The session object to store. Contains all authentication and user data.
+</ParamField>
+
+<ResponseField name="returns" type="Promise<boolean>">
+  Returns `true` if the session was successfully stored, `false` otherwise.
+</ResponseField>
+
+**Behavior:**
+- If a session with the same `id` exists, it will be updated
+- If no session exists with that `id`, a new one will be created
+- This implements an "upsert" pattern (update or insert)
+
+**Example:**
+
+```typescript
+const session = new Session({
+  id: 'offline_example.myshopify.com',
+  shop: 'example.myshopify.com',
+  state: 'state-value',
+  isOnline: false,
+  accessToken: 'shpat_xxxxx',
+  scope: 'read_products,write_orders'
+});
+
+const success = await sessionStorage.storeSession(session);
+if (success) {
+  console.log('Session stored successfully');
+}
+```
+
+### loadSession
+
+Retrieves a session from storage by its ID.
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the session to load.
+</ParamField>
+
+<ResponseField name="returns" type="Promise<Session | undefined>">
+  Returns the `Session` object if found, or `undefined` if no session exists with that ID.
+</ResponseField>
+
+**Session ID Format:**
+- Offline sessions: `offline_{shop}`
+- Online sessions: `{shop}_{userId}`
+
+**Example:**
+
+```typescript
+const session = await sessionStorage.loadSession(
+  'offline_example.myshopify.com'
+);
+
+if (session) {
+  console.log('Access token:', session.accessToken);
+  console.log('Expires:', session.expires);
+} else {
+  console.log('Session not found');
+}
+```
+
+### deleteSession
+
+Deletes a single session from storage.
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the session to delete.
+</ParamField>
+
+<ResponseField name="returns" type="Promise<boolean>">
+  Returns `true` if the session was successfully deleted, `false` otherwise.
+</ResponseField>
+
+**Behavior:**
+- Attempting to delete a non-existent session typically returns `true`
+- This method is idempotent (safe to call multiple times)
+
+**Example:**
+
+```typescript
+// Delete session when user logs out or uninstalls app
+const deleted = await sessionStorage.deleteSession(
+  'offline_example.myshopify.com'
+);
+
+if (deleted) {
+  console.log('Session deleted');
+}
+```
+
+### deleteSessions
+
+Deletes multiple sessions in a single operation.
+
+<ParamField path="ids" type="string[]" required>
+  Array of session IDs to delete.
+</ParamField>
+
+<ResponseField name="returns" type="Promise<boolean>">
+  Returns `true` if all sessions were successfully deleted, `false` otherwise.
+</ResponseField>
+
+**Use Cases:**
+- Cleaning up all sessions for a shop when app is uninstalled
+- Batch deletion of expired sessions
+- Removing all online sessions for a shop
+
+**Example:**
+
+```typescript
+// Delete all sessions for a shop
+const shopSessions = await sessionStorage.findSessionsByShop(
+  'example.myshopify.com'
+);
+
+const sessionIds = shopSessions.map(session => session.id);
+const deleted = await sessionStorage.deleteSessions(sessionIds);
+
+if (deleted) {
+  console.log(`Deleted ${sessionIds.length} sessions`);
+}
+```
+
+### findSessionsByShop
+
+Finds all sessions associated with a specific shop.
+
+<ParamField path="shop" type="string" required>
+  The shop domain (e.g., 'example.myshopify.com').
+</ParamField>
+
+<ResponseField name="returns" type="Promise<Session[]>">
+  Returns an array of `Session` objects. Returns an empty array if no sessions are found.
+</ResponseField>
+
+**What It Returns:**
+- Both online and offline sessions for the shop
+- Active and expired sessions (check `expires` field)
+- Sessions for all users who have accessed the app from that shop
+
+**Example:**
+
+```typescript
+// Find all sessions for a shop
+const sessions = await sessionStorage.findSessionsByShop(
+  'example.myshopify.com'
+);
+
+console.log(`Found ${sessions.length} sessions`);
+
+sessions.forEach(session => {
+  console.log(`- ${session.id} (online: ${session.isOnline})`);
+});
+
+// Filter to only active sessions
+const now = new Date();
+const activeSessions = sessions.filter(
+  session => !session.expires || session.expires > now
+);
+```
+
+## Implementation Guidelines
+
+If you're implementing a custom session storage adapter, follow these guidelines:
+
+### Thread Safety
+
+<Note>
+  Implementations should be safe for concurrent access. Multiple requests may attempt to read/write sessions simultaneously.
+</Note>
+
+### Error Handling
+
+Implementations should:
+- Catch database errors and log them appropriately
+- Return `false` on storage/deletion failures rather than throwing
+- Return `undefined` from `loadSession` on errors, not throw
+
+### Performance Considerations
+
+- **Index the `shop` column** for efficient `findSessionsByShop` queries
+- **Use upsert operations** in `storeSession` to avoid race conditions
+- **Implement connection pooling** for database adapters
+- **Consider caching** for frequently accessed sessions
+
+### Data Serialization
+
+Different storage backends require different serialization:
+
+<Tabs>
+  <Tab title="Relational (SQL)">
+    Store each session property as a separate column:
+    
+    ```typescript
+    // Convert Session to row data
+    const entries = session.toPropertyArray(true);
+    
+    // Handle expires conversion (milliseconds to seconds)
+    if (row.expires) {
+      row.expires = Math.floor(row.expires / 1000);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Document (MongoDB)">
+    Store the entire session as a document:
+    
+    ```typescript
+    await collection.findOneAndReplace(
+      {id: session.id},
+      session.toObject(),
+      {upsert: true}
+    );
+    ```
+  </Tab>
+  
+  <Tab title="Key-Value (Redis, KV)">
+    Serialize to JSON:
+    
+    ```typescript
+    const data = JSON.stringify(
+      session.toPropertyArray(true)
+    );
+    await store.set(session.id, data);
+    ```
+  </Tab>
+</Tabs>
+
+### Deserialization
+
+When loading sessions, reconstruct the `Session` object:
+
+```typescript
+// From property array (for JSON storage)
+const session = Session.fromPropertyArray(propertyArray, true);
+
+// From object (for document storage)
+const session = new Session(sessionObject);
+```
+
+## Testing Your Implementation
+
+The SDK provides testing utilities:
+
+```typescript
+import {batteryOfTests} from '@shopify/shopify-app-session-storage-test-utils';
+import {MyCustomSessionStorage} from './my-storage';
+
+describe('MyCustomSessionStorage', () => {
+  batteryOfTests(async () => new MyCustomSessionStorage());
+});
+```
+
+<Note>
+  The `batteryOfTests` function runs a comprehensive test suite that verifies your implementation correctly handles all SessionStorage methods.
+</Note>
+
+## Additional Interfaces
+
+### RdbmsSessionStorageOptions
+
+Configuration for relational database adapters:
+
+```typescript
+interface RdbmsSessionStorageOptions {
+  sessionTableName: string;
+  migratorOptions?: RdbmsSessionStorageMigratorOptions;
+}
+```
+
+<ParamField path="sessionTableName" type="string" default="shopify_sessions">
+  Name of the table to store sessions.
+</ParamField>
+
+<ParamField path="migratorOptions" type="RdbmsSessionStorageMigratorOptions">
+  Configuration for the migration system.
+</ParamField>
+
+### SessionStorageMigrator
+
+Handles database migrations for session storage:
+
+```typescript
+interface SessionStorageMigrator {
+  initMigrationPersistence(): Promise<void>;
+  hasMigrationBeenApplied(migrationName: string): Promise<boolean>;
+  saveAppliedMigration(migrationName: string): Promise<void>;
+  getMigrationList(): MigrationOperation[];
+  applyMigrations(databaseReady: Promise<void>): Promise<void>;
+}
+```
+
+<Note>
+  Most users don't need to interact with the migrator directly. It runs automatically when initializing RDBMS-based storage adapters.
+</Note>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Database Adapters" icon="plug" href="/session-storage/adapters">
+    Setup guides for each official adapter
+  </Card>
+  <Card title="Session Storage Overview" icon="book" href="/session-storage/overview">
+    Learn about session storage concepts
+  </Card>
+</CardGroup>

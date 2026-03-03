@@ -1,0 +1,521 @@
+---
+title: 'Client Classes'
+description: 'GraphQL, REST, and Storefront API client classes for making requests to Shopify'
+---
+
+## Overview
+
+The Shopify API library provides client classes for making authenticated requests to Shopify's Admin and Storefront APIs.
+
+Access client classes through your configured Shopify instance:
+
+```typescript
+const shopify = shopifyApi({ /* config */ });
+
+// Client classes
+const RestClient = shopify.clients.Rest;
+const GraphqlClient = shopify.clients.Graphql;
+const StorefrontClient = shopify.clients.Storefront;
+const graphqlProxy = shopify.clients.graphqlProxy;
+```
+
+## GraphQL Client
+
+The GraphQL client for making requests to the Shopify Admin GraphQL API.
+
+### Constructor
+
+```typescript
+class GraphqlClient {
+  constructor(params: GraphqlClientParams)
+}
+```
+
+#### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session object containing shop and access token.
+</ParamField>
+
+<ParamField path="apiVersion" type="ApiVersion">
+  Override the API version for this client. Defaults to the configured version.
+</ParamField>
+
+### request()
+
+Makes a GraphQL request to the Admin API.
+
+#### Signature
+
+```typescript
+async request<T = undefined, Operation extends keyof Operations = string>(
+  operation: Operation,
+  options?: GraphqlQueryOptions<Operation, Operations>,
+): Promise<GraphQLClientResponse<T>>
+```
+
+#### Parameters
+
+<ParamField path="operation" type="string" required>
+  The GraphQL query or mutation string.
+</ParamField>
+
+<ParamField path="options" type="GraphqlQueryOptions">
+  Query options:
+  
+  <Expandable title="Options">
+    <ParamField path="variables" type="object">
+      Variables to include in the operation.
+    </ParamField>
+    
+    <ParamField path="headers" type="Record<string, string | number>">
+      Additional headers to send with the request.
+    </ParamField>
+    
+    <ParamField path="retries" type="number">
+      Maximum number of retry attempts for throttling or server errors.
+    </ParamField>
+    
+    <ParamField path="signal" type="AbortSignal">
+      Optional AbortSignal to cancel the request.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+#### Returns
+
+<ResponseField name="data" type="T">
+  The response data from the GraphQL query.
+</ResponseField>
+
+<ResponseField name="headers" type="Headers">
+  Response headers.
+</ResponseField>
+
+<ResponseField name="errors" type="GraphQLError[]">
+  GraphQL errors (if any).
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Query
+const client = new shopify.clients.Graphql({ session });
+
+const response = await client.request(`
+  query getProducts {
+    products(first: 10) {
+      edges {
+        node {
+          id
+          title
+          handle
+        }
+      }
+    }
+  }
+`);
+
+console.log(response.data.products);
+```
+
+```typescript With Variables
+const client = new shopify.clients.Graphql({ session });
+
+const response = await client.request(
+  `mutation updateProduct($input: ProductInput!) {
+    productUpdate(input: $input) {
+      product {
+        id
+        title
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }`,
+  {
+    variables: {
+      input: {
+        id: 'gid://shopify/Product/1234567890',
+        title: 'New Product Title',
+      },
+    },
+  }
+);
+
+if (response.data.productUpdate.userErrors.length > 0) {
+  console.error('Errors:', response.data.productUpdate.userErrors);
+} else {
+  console.log('Updated:', response.data.productUpdate.product);
+}
+```
+
+```typescript With Custom Headers and Retries
+const client = new shopify.clients.Graphql({ session });
+
+const response = await client.request(
+  query,
+  {
+    variables: { id: productId },
+    headers: {
+      'X-Custom-Header': 'value',
+    },
+    retries: 3,
+  }
+);
+```
+
+```typescript Different API Version
+const client = new shopify.clients.Graphql({
+  session,
+  apiVersion: ApiVersion.January25,
+});
+
+const response = await client.request(query);
+```
+</CodeGroup>
+
+## REST Client
+
+The REST client for making requests to the Shopify Admin REST API.
+
+### Constructor
+
+```typescript
+class RestClient {
+  constructor(params: RestClientParams)
+}
+```
+
+#### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session object containing shop and access token.
+</ParamField>
+
+<ParamField path="apiVersion" type="ApiVersion">
+  Override the API version for this client.
+</ParamField>
+
+### get()
+
+Performs a GET request.
+
+```typescript
+async get<T = any>(params: GetRequestParams): Promise<RestRequestReturn<T>>
+```
+
+### post()
+
+Performs a POST request.
+
+```typescript
+async post<T = any>(params: PostRequestParams): Promise<RestRequestReturn<T>>
+```
+
+### put()
+
+Performs a PUT request.
+
+```typescript
+async put<T = any>(params: PutRequestParams): Promise<RestRequestReturn<T>>
+```
+
+### delete()
+
+Performs a DELETE request.
+
+```typescript
+async delete<T = any>(params: DeleteRequestParams): Promise<RestRequestReturn<T>>
+```
+
+#### Request Parameters
+
+<ParamField path="path" type="string" required>
+  The path to the resource, relative to the API version root.
+</ParamField>
+
+<ParamField path="type" type="DataType">
+  The type of data expected in the response.
+  - `DataType.JSON` (default)
+  - `DataType.GraphQL`
+  - `DataType.URLEncoded`
+</ParamField>
+
+<ParamField path="data" type="Record<string, any> | string">
+  The request body (required for POST/PUT).
+</ParamField>
+
+<ParamField path="query" type="SearchParams">
+  Query parameters to send with the request.
+</ParamField>
+
+<ParamField path="extraHeaders" type="HeaderParams">
+  Additional headers to send with the request.
+</ParamField>
+
+<ParamField path="tries" type="number">
+  Maximum number of retry attempts.
+</ParamField>
+
+#### Returns
+
+<ResponseField name="body" type="T">
+  The response body.
+</ResponseField>
+
+<ResponseField name="headers" type="Headers">
+  The response headers.
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript GET Request
+const client = new shopify.clients.Rest({ session });
+
+const response = await client.get({
+  path: 'products',
+  query: { limit: '10' },
+});
+
+console.log(response.body.products);
+```
+
+```typescript POST Request
+const client = new shopify.clients.Rest({ session });
+
+const response = await client.post({
+  path: 'products',
+  data: {
+    product: {
+      title: 'New Product',
+      body_html: '<p>Product description</p>',
+      vendor: 'My Vendor',
+    },
+  },
+  type: DataType.JSON,
+});
+
+console.log('Created:', response.body.product);
+```
+
+```typescript PUT Request
+const client = new shopify.clients.Rest({ session });
+
+const response = await client.put({
+  path: `products/${productId}`,
+  data: {
+    product: {
+      id: productId,
+      title: 'Updated Title',
+    },
+  },
+});
+```
+
+```typescript DELETE Request
+const client = new shopify.clients.Rest({ session });
+
+const response = await client.delete({
+  path: `products/${productId}`,
+});
+```
+
+```typescript With Custom Headers
+const client = new shopify.clients.Rest({ session });
+
+const response = await client.get({
+  path: 'products',
+  extraHeaders: {
+    'X-Custom-Header': 'value',
+  },
+  tries: 3,
+});
+```
+</CodeGroup>
+
+## Storefront Client
+
+The GraphQL client for making requests to the Shopify Storefront API.
+
+### Constructor
+
+```typescript
+class StorefrontClient {
+  constructor(params: StorefrontClientParams)
+}
+```
+
+#### Parameters
+
+<ParamField path="session" type="Session" required>
+  The session object (can use storefront access token).
+</ParamField>
+
+<ParamField path="apiVersion" type="ApiVersion">
+  Override the API version for this client.
+</ParamField>
+
+### request()
+
+Makes a GraphQL request to the Storefront API.
+
+```typescript
+async request<T = any>(
+  operation: string,
+  options?: GraphqlQueryOptions
+): Promise<StorefrontResponse<T>>
+```
+
+#### Example
+
+<CodeGroup>
+```typescript Storefront Query
+const client = new shopify.clients.Storefront({ session });
+
+const response = await client.request(`
+  query getProduct($handle: String!) {
+    productByHandle(handle: $handle) {
+      id
+      title
+      description
+      priceRange {
+        minVariantPrice {
+          amount
+          currencyCode
+        }
+      }
+    }
+  }`,
+  {
+    variables: { handle: 'my-product' },
+  }
+);
+
+console.log(response.data.productByHandle);
+```
+
+```typescript Cart Mutation
+const client = new shopify.clients.Storefront({ session });
+
+const response = await client.request(`
+  mutation createCart($input: CartInput!) {
+    cartCreate(input: $input) {
+      cart {
+        id
+        lines(first: 10) {
+          edges {
+            node {
+              id
+              quantity
+            }
+          }
+        }
+      }
+    }
+  }`,
+  {
+    variables: {
+      input: {
+        lines: [
+          {
+            merchandiseId: 'gid://shopify/ProductVariant/1234567890',
+            quantity: 1,
+          },
+        ],
+      },
+    },
+  }
+);
+```
+</CodeGroup>
+
+## GraphQL Proxy
+
+Proxy GraphQL requests from the frontend through your backend.
+
+### Signature
+
+```typescript
+type GraphqlProxy = (params: GraphqlProxyParams) => Promise<Response>;
+```
+
+### Example
+
+```typescript
+app.post('/api/graphql', async (req, res) => {
+  const response = await shopify.clients.graphqlProxy({
+    session,
+    rawBody: req.body,
+    rawRequest: req,
+    rawResponse: res,
+  });
+  
+  res.status(response.status).send(response.body);
+});
+```
+
+## Types
+
+### DataType
+
+```typescript
+enum DataType {
+  JSON = 'application/json',
+  GraphQL = 'application/graphql',
+  URLEncoded = 'application/x-www-form-urlencoded',
+}
+```
+
+### RequestReturn
+
+```typescript
+interface RequestReturn<T = unknown> {
+  body: T;
+  headers: Headers;
+}
+```
+
+### ClientArgs
+
+```typescript
+interface ClientArgs {
+  session: Session;
+  apiVersion?: ApiVersion;
+  retries?: number;
+}
+```
+
+## Error Handling
+
+All clients throw errors for failed requests:
+
+```typescript
+try {
+  const response = await client.request(query);
+} catch (error) {
+  if (error instanceof ShopifyErrors.HttpResponseError) {
+    console.error('HTTP Error:', error.response.status);
+    console.error('Body:', error.response.body);
+  } else if (error instanceof ShopifyErrors.GraphqlQueryError) {
+    console.error('GraphQL Errors:', error.response.errors);
+  }
+}
+```
+
+## Notes
+
+<Note>
+  All clients automatically handle rate limiting with exponential backoff when `retries` is specified.
+</Note>
+
+<Note>
+  The GraphQL client provides type-safe operations when used with generated types from the Shopify Admin API.
+</Note>
+
+<Note>
+  REST client methods return the full response object including headers, useful for pagination with Link headers.
+</Note>
